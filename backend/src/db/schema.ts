@@ -1,5 +1,18 @@
 import { sqliteTable, text, real, integer } from "drizzle-orm/sqlite-core";
 
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  spotifyId: text("spotify_id").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  email: text("email"),
+  avatarUrl: text("avatar_url"),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  tokenExpiresAt: integer("token_expires_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export const elements = sqliteTable("elements", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -18,5 +31,6 @@ export const combinations = sqliteTable("combinations", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+export type User = typeof users.$inferSelect;
 export type Element = typeof elements.$inferSelect;
 export type Combination = typeof combinations.$inferSelect;

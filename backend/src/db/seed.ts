@@ -23,6 +23,19 @@ async function seed() {
   console.log("Creating tables...");
 
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      spotify_id TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      email TEXT,
+      avatar_url TEXT,
+      access_token TEXT NOT NULL,
+      refresh_token TEXT NOT NULL,
+      token_expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS elements (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

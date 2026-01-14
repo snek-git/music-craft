@@ -13,6 +13,23 @@
     instanceId: string;
   }
 
+  interface User {
+    id: string;
+    spotifyId: string;
+    displayName: string;
+    email?: string;
+    avatarUrl?: string;
+  }
+
+  interface SpotifyArtist {
+    id: string;
+    name: string;
+    genres: string[];
+    imageUrl?: string;
+    popularity: number;
+    spotifyUrl: string;
+  }
+
   let allElements: Element[] = $state([]);
   let canvas: CanvasElement[] = $state([]);
   let loading: { x: number; y: number } | null = $state(null);
@@ -42,6 +59,14 @@
   let selectedInfo: ArtistInfo | null = $state(null);
   let loadingInfo = $state(false);
   let dragMoved = $state(false);
+
+  // Spotify auth state
+  let user: User | null = $state(null);
+  let showImportModal = $state(false);
+  let topArtists: SpotifyArtist[] = $state([]);
+  let loadingTopArtists = $state(false);
+  let selectedArtists = $state<Set<string>>(new Set());
+  let importingArtists = $state(false);
 
   async function lookupArtist() {
     if (!newArtist.trim() || addingArtist) return;
@@ -83,9 +108,100 @@
     pendingArtist = null;
   }
 
+  // Spotify auth functions
+  async function checkAuth() {
+    try {
+      const res = await fetch("/api/auth/me", { credentials: "include" });
+      const data = await res.json();
+      user = data.user;
+    } catch (error) {
+      console.error("Failed to check auth:", error);
+    }
+  }
+
+  function login() {
+    window.location.href = "/api/auth/login";
+  }
+
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+      user = null;
+    } catch (error) {
+      console.error("Failed to logout:", error);
+    }
+  }
+
+  async function openImportModal() {
+    showImportModal = true;
+    selectedArtists = new Set();
+    loadingTopArtists = true;
+    try {
+      const res = await fetch("/api/spotify/top-artists?time_range=medium_term&limit=50", {
+        credentials: "include",
+      });
+      const data = await res.json();
+      topArtists = data.artists || [];
+    } catch (error) {
+      console.error("Failed to load top artists:", error);
+      topArtists = [];
+    } finally {
+      loadingTopArtists = false;
+    }
+  }
+
+  function toggleArtistSelection(artistId: string) {
+    const newSelected = new Set(selectedArtists);
+    if (newSelected.has(artistId)) {
+      newSelected.delete(artistId);
+    } else {
+      newSelected.add(artistId);
+    }
+    selectedArtists = newSelected;
+  }
+
+  async function importSelectedArtists() {
+    if (selectedArtists.size === 0) return;
+    importingArtists = true;
+    try {
+      const res = await fetch("/api/spotify/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ artistIds: Array.from(selectedArtists) }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        // Refresh elements list
+        const elementsRes = await fetch("/api/elements");
+        allElements = await elementsRes.json();
+
+        showImportModal = false;
+        selectedArtists = new Set();
+        result = {
+          imported: true,
+          message: `Imported ${data.total} artist${data.total !== 1 ? 's' : ''}${data.skipped?.length ? ` (${data.skipped.length} already existed)` : ''}`
+        };
+      }
+    } catch (error) {
+      console.error("Failed to import artists:", error);
+    } finally {
+      importingArtists = false;
+    }
+  }
+
+  function closeImportModal() {
+    showImportModal = false;
+    selectedArtists = new Set();
+  }
+
   onMount(async () => {
     const res = await fetch("/api/elements");
     allElements = await res.json();
+
+    // Check auth status
+    await checkAuth();
 
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
@@ -248,6 +364,25 @@
     <h1>Music Craft</h1>
     <p class="hint">Drag to canvas, bring close to combine</p>
 
+    {#if user}
+      <div class="user-profile">
+        {#if user.avatarUrl}
+          <img src={user.avatarUrl} alt={user.displayName} class="user-avatar" />
+        {/if}
+        <div class="user-info">
+          <span class="user-name">{user.displayName}</span>
+          <button class="user-logout" onclick={logout}>Logout</button>
+        </div>
+      </div>
+      <button class="spotify-import-btn" onclick={openImportModal}>
+        Import from Spotify
+      </button>
+    {:else}
+      <button class="spotify-login-btn" onclick={login}>
+        Login with Spotify
+      </button>
+    {/if}
+
     {#if result?.result}
       <div class="discovery">
         <span class="label">Discovered</span>
@@ -256,6 +391,11 @@
           {result.result.type}
         </span>
         <p class="reasoning">{result.combination?.reasoning}</p>
+      </div>
+    {:else if result?.imported}
+      <div class="discovery success">
+        <span class="label">Import Success</span>
+        <p class="reasoning">{result.message}</p>
       </div>
     {:else if result?.noMatch}
       <div class="discovery no-match">
@@ -378,6 +518,55 @@
   {#if loadingInfo}
     <div class="info-overlay">
       <div class="info-loading">Loading...</div>
+    </div>
+  {/if}
+
+  {#if showImportModal}
+    <div class="info-overlay" onclick={closeImportModal}>
+      <div class="import-modal" onclick={(e) => e.stopPropagation()}>
+        <button class="info-close" onclick={closeImportModal}>&times;</button>
+        <h2>Import Top Artists from Spotify</h2>
+
+        {#if loadingTopArtists}
+          <div class="import-loading">Loading your top artists...</div>
+        {:else if topArtists.length === 0}
+          <p class="import-empty">No top artists found. Start listening to music on Spotify!</p>
+        {:else}
+          <p class="import-hint">Select artists to import ({selectedArtists.size} selected)</p>
+          <div class="import-artists">
+            {#each topArtists as artist (artist.id)}
+              <div
+                class="import-artist"
+                class:selected={selectedArtists.has(artist.id)}
+                onclick={() => toggleArtistSelection(artist.id)}
+              >
+                {#if artist.imageUrl}
+                  <img src={artist.imageUrl} alt={artist.name} class="import-artist-img" />
+                {/if}
+                <div class="import-artist-info">
+                  <span class="import-artist-name">{artist.name}</span>
+                  {#if artist.genres.length > 0}
+                    <span class="import-artist-genres">{artist.genres.slice(0, 2).join(", ")}</span>
+                  {/if}
+                </div>
+                <div class="import-artist-check">
+                  {#if selectedArtists.has(artist.id)}✓{/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+          <div class="import-actions">
+            <button
+              class="import-btn"
+              onclick={importSelectedArtists}
+              disabled={selectedArtists.size === 0 || importingArtists}
+            >
+              {importingArtists ? "Importing..." : `Import ${selectedArtists.size} Artist${selectedArtists.size !== 1 ? 's' : ''}`}
+            </button>
+            <button class="import-cancel" onclick={closeImportModal}>Cancel</button>
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
@@ -791,6 +980,226 @@
     border: 1px solid #27272a;
     border-radius: 12px;
     padding: 1rem 2rem;
+    color: #fff;
+  }
+
+  /* Spotify Login/User Profile */
+  .spotify-login-btn, .spotify-import-btn {
+    width: 100%;
+    background: rgba(30, 215, 96, 0.15);
+    border: 1px solid rgba(30, 215, 96, 0.4);
+    border-radius: 8px;
+    padding: 0.6rem;
+    color: #1ed760;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .spotify-login-btn:hover, .spotify-import-btn:hover {
+    background: rgba(30, 215, 96, 0.25);
+    transform: translateY(-1px);
+  }
+
+  .user-profile {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid #27272a;
+    border-radius: 12px;
+    padding: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .user-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  .user-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .user-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .user-logout {
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 0.7rem;
+    cursor: pointer;
+    text-align: left;
+    padding: 0;
+  }
+
+  .user-logout:hover {
+    color: #f472b6;
+  }
+
+  .discovery.success {
+    border-color: #4ade80;
+    background: rgba(74, 222, 128, 0.05);
+  }
+
+  .discovery.success .label {
+    color: #4ade80;
+  }
+
+  /* Import Modal */
+  .import-modal {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 16px;
+    padding: 1.5rem;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    position: relative;
+  }
+
+  .import-modal h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1.25rem;
+    color: #1ed760;
+  }
+
+  .import-hint {
+    color: #666;
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+  }
+
+  .import-loading, .import-empty {
+    color: #999;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .import-artists {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .import-artist {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 8px;
+    padding: 0.6rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .import-artist:hover {
+    background: #1f1f23;
+    border-color: rgba(30, 215, 96, 0.3);
+  }
+
+  .import-artist.selected {
+    background: rgba(30, 215, 96, 0.1);
+    border-color: rgba(30, 215, 96, 0.5);
+  }
+
+  .import-artist-img {
+    width: 50px;
+    height: 50px;
+    border-radius: 6px;
+    object-fit: cover;
+  }
+
+  .import-artist-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .import-artist-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .import-artist-genres {
+    font-size: 0.7rem;
+    color: #666;
+  }
+
+  .import-artist-check {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid #27272a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    color: #1ed760;
+    transition: all 0.15s ease;
+  }
+
+  .import-artist.selected .import-artist-check {
+    border-color: #1ed760;
+    background: rgba(30, 215, 96, 0.2);
+  }
+
+  .import-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .import-btn {
+    flex: 1;
+    background: rgba(30, 215, 96, 0.2);
+    border: 1px solid rgba(30, 215, 96, 0.4);
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    color: #1ed760;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .import-btn:hover:not(:disabled) {
+    background: rgba(30, 215, 96, 0.3);
+  }
+
+  .import-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .import-cancel {
+    background: #27272a;
+    border: 1px solid #27272a;
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    color: #888;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .import-cancel:hover {
+    background: #333;
     color: #fff;
   }
 </style>
