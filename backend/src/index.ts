@@ -4,11 +4,16 @@ import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { elements } from "./db/schema";
 import combineRoutes from "./routes/combine";
+import authRoutes from "./routes/auth";
+import spotifyRoutes from "./routes/spotify";
 import { getArtist, searchArtist } from "./services/lastfm";
 
 const app = new Hono();
 
-app.use("/*", cors());
+app.use("/*", cors({
+  origin: ["http://127.0.0.1:5173", "http://localhost:5173"],
+  credentials: true,
+}));
 
 app.get("/api/elements", async (c) => {
   const allElements = await db.select().from(elements);
@@ -67,6 +72,8 @@ app.post("/api/elements", async (c) => {
 });
 
 app.route("/api/combine", combineRoutes);
+app.route("/api/auth", authRoutes);
+app.route("/api/spotify", spotifyRoutes);
 
 app.get("/api/artist/:name", async (c) => {
   const name = c.req.param("name");
