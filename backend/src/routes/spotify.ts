@@ -12,14 +12,21 @@ const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-producti
 
 // Middleware to require authentication
 async function requireAuth(c: any, next: () => Promise<void>) {
-  const sessionToken = getCookie(c, "session");
+  // Check Authorization header first, then fall back to cookie
+  let sessionToken = null;
+  const authHeader = c.req.header("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    sessionToken = authHeader.slice(7);
+  } else {
+    sessionToken = getCookie(c, "session");
+  }
 
   if (!sessionToken) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
   try {
-    const payload = await verify(sessionToken, JWT_SECRET);
+    const payload = await verify(sessionToken, JWT_SECRET, "HS256");
     const user = await db.query.users.findFirst({
       where: eq(users.id, payload.userId as string),
     });
@@ -88,7 +95,7 @@ app.get("/top-artists", async (c) => {
   }
 });
 
-// POST /api/spotify/import - Import selected artists
+// POST /api/spotify/import - Import selected artists and their genres
 app.post("/import", async (c) => {
   const { artistIds } = await c.req.json<{ artistIds: string[] }>();
 
@@ -103,21 +110,56 @@ app.post("/import", async (c) => {
     const topArtists = await getTopArtists(user.accessToken, "medium_term", 50);
     const artistsToImport = topArtists.filter((a) => artistIds.includes(a.id));
 
-    const imported = [];
-    const skipped = [];
+    const importedArtists: string[] = [];
+    const skippedArtists: string[] = [];
+    const importedGenres: string[] = [];
+    const skippedGenres: string[] = [];
 
+    // Collect all unique genres from selected artists
+    const allGenres = new Set<string>();
     for (const artist of artistsToImport) {
-      // Check if artist already exists
+      for (const genre of artist.genres) {
+        // Capitalize first letter of each word
+        const formattedGenre = genre
+          .split(" ")
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" ");
+        allGenres.add(formattedGenre);
+      }
+    }
+
+    // Import genres
+    for (const genre of allGenres) {
+      const existing = await db.query.elements.findFirst({
+        where: eq(elements.name, genre),
+      });
+
+      if (existing) {
+        skippedGenres.push(genre);
+        continue;
+      }
+
+      const id = crypto.randomUUID();
+      await db.insert(elements).values({
+        id,
+        name: genre,
+        type: "genre",
+        createdAt: new Date(),
+      });
+      importedGenres.push(genre);
+    }
+
+    // Import artists
+    for (const artist of artistsToImport) {
       const existing = await db.query.elements.findFirst({
         where: eq(elements.name, artist.name),
       });
 
       if (existing) {
-        skipped.push(artist.name);
+        skippedArtists.push(artist.name);
         continue;
       }
 
-      // Create new artist element
       const id = crypto.randomUUID();
       await db.insert(elements).values({
         id,
@@ -126,19 +168,18 @@ app.post("/import", async (c) => {
         spotifySearchQuery: artist.name,
         createdAt: new Date(),
       });
-
-      imported.push(artist.name);
+      importedArtists.push(artist.name);
     }
 
     return c.json({
       success: true,
-      imported,
-      skipped,
-      total: imported.length,
+      artists: { imported: importedArtists, skipped: skippedArtists },
+      genres: { imported: importedGenres, skipped: skippedGenres },
+      total: importedArtists.length + importedGenres.length,
     });
   } catch (error) {
-    console.error("Failed to import artists:", error);
-    return c.json({ error: "Failed to import artists" }, 500);
+    console.error("Failed to import:", error);
+    return c.json({ error: "Failed to import" }, 500);
   }
 });
 
