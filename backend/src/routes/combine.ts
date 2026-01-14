@@ -2,12 +2,11 @@ import { Hono } from "hono";
 import { eq, and } from "drizzle-orm";
 import { db } from "../db";
 import { elements, combinations } from "../db/schema";
-import { combineElements } from "../services/llm";
-import { getArtist, searchArtist } from "../services/lastfm";
+import { combineElements as llmCombine } from "../services/llm";
+import { getArtist } from "../services/lastfm";
+import { findArtistIntersection, findArtistForGenre } from "../services/artistGraph";
 
 const app = new Hono();
-
-const MAX_RETRIES = 3;
 
 app.post("/", async (c) => {
   const { elementA: elementAId, elementB: elementBId } = await c.req.json<{
@@ -34,6 +33,7 @@ app.post("/", async (c) => {
 
   const [sortedA, sortedB] = [elementAId, elementBId].sort();
 
+  // Check cache first
   const existing = await db.query.combinations.findFirst({
     where: and(
       eq(combinations.elementA, sortedA),
@@ -52,68 +52,102 @@ app.post("/", async (c) => {
     });
   }
 
-  const failedNames: string[] = [];
-  let llmResult = null;
-  let finalName = "";
-  let lastfmData = null;
-  let lastSuggestion = "";
-
-  // Get all existing artists to avoid repetition
-  const existingArtists = await db.select({ name: elements.name })
+  // Get existing artists to exclude from results
+  const existingArtists = await db
+    .select({ name: elements.name })
     .from(elements)
     .where(eq(elements.type, "artist"));
-  const excludeArtists = existingArtists.map(e => e.name);
+  const excludeArtists = existingArtists.map((e) => e.name);
 
-  // Fetch Last.fm data for artists to enrich the LLM prompt
-  const [lastfmA, lastfmB] = await Promise.all([
-    elA.type === "artist" ? getArtist(elA.name) : null,
-    elB.type === "artist" ? getArtist(elB.name) : null,
-  ]);
+  let finalName = "";
+  let finalType: "artist" | "genre" = "artist";
+  let reasoning = "";
+  let confidence = 0;
+  let lastfmData = null;
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    llmResult = await combineElements(
-      { name: elA.name, type: elA.type, bio: lastfmA?.bio, tags: lastfmA?.tags },
-      { name: elB.name, type: elB.type, bio: lastfmB?.bio, tags: lastfmB?.tags },
-      failedNames
+  const isArtistA = elA.type === "artist";
+  const isArtistB = elB.type === "artist";
+
+  if (isArtistA && isArtistB) {
+    // Artist + Artist = Graph intersection (BFS up to depth 3)
+    console.log(`Finding intersection: ${elA.name} <-> ${elB.name}`);
+    const intersection = await findArtistIntersection(
+      elA.name,
+      elB.name,
+      3,
+      excludeArtists
     );
 
-    if (!llmResult) break;
+    if (intersection) {
+      finalName = intersection.artist;
+      finalType = "artist";
+      confidence = intersection.combinedScore;
+      reasoning = `Found via listener overlap: ${intersection.pathA.join(" -> ")} meets ${intersection.pathB.reverse().join(" -> ")}`;
+      console.log(`Intersection found: ${finalName} (score: ${confidence.toFixed(3)})`);
 
-    // For artists, try to validate with Last.fm
-    if (llmResult.type === "artist") {
-      lastSuggestion = llmResult.name;
-      let validated = await getArtist(llmResult.name);
-      if (!validated) {
-        validated = await searchArtist(llmResult.name);
+      // Get Last.fm data for the result
+      const artistData = await getArtist(finalName);
+      if (artistData) {
+        lastfmData = { url: artistData.url, listeners: artistData.listeners };
       }
-
-      if (validated) {
-        console.log(`Validated artist: ${validated.name} (${validated.listeners} listeners)`);
-        finalName = validated.name;
-        lastfmData = { url: validated.url, listeners: validated.listeners };
-        break;
-      }
-
-      console.log(`Artist not found on Last.fm: ${llmResult.name}, retrying...`);
-      failedNames.push(llmResult.name);
     } else {
-      // Genres don't need validation
+      // Fall back to LLM if graph search fails
+      console.log("No graph intersection found, falling back to LLM...");
+      const [lastfmA, lastfmB] = await Promise.all([
+        getArtist(elA.name),
+        getArtist(elB.name),
+      ]);
+      const llmResult = await llmCombine(
+        { name: elA.name, type: elA.type, bio: lastfmA?.bio, tags: lastfmA?.tags },
+        { name: elB.name, type: elB.type, bio: lastfmB?.bio, tags: lastfmB?.tags }
+      );
+      if (llmResult) {
+        finalName = llmResult.name;
+        finalType = llmResult.type;
+        confidence = llmResult.confidence;
+        reasoning = `(LLM fallback) ${llmResult.reasoning}`;
+      }
+    }
+  } else if (isArtistA || isArtistB) {
+    // Artist + Genre = Find similar artist matching the genre vibe
+    const artist = isArtistA ? elA.name : elB.name;
+    const genre = isArtistA ? elB.name : elA.name;
+
+    console.log(`Finding artist for: ${artist} + ${genre}`);
+    const result = await findArtistForGenre(genre, artist, excludeArtists);
+
+    if (result) {
+      finalName = result.artist;
+      finalType = "artist";
+      confidence = result.combinedScore;
+      reasoning = `Similar to ${artist}, in the direction of ${genre}`;
+
+      const artistData = await getArtist(finalName);
+      if (artistData) {
+        lastfmData = { url: artistData.url, listeners: artistData.listeners };
+      }
+    }
+  } else {
+    // Genre + Genre = Use LLM (this is the only case where vibes make sense)
+    console.log(`Genre fusion: ${elA.name} + ${elB.name}`);
+    const llmResult = await llmCombine(
+      { name: elA.name, type: elA.type },
+      { name: elB.name, type: elB.type }
+    );
+
+    if (llmResult) {
       finalName = llmResult.name;
-      break;
+      finalType = llmResult.type;
+      confidence = llmResult.confidence;
+      reasoning = llmResult.reasoning;
     }
   }
 
-  // If Last.fm validation failed but LLM suggested something, accept it anyway
-  if (!finalName && lastSuggestion && llmResult) {
-    console.log(`Accepting unverified artist: ${lastSuggestion}`);
-    finalName = lastSuggestion;
-  }
-
-  if (!llmResult || !finalName) {
+  if (!finalName) {
     return c.json({ error: "No valid result found", noMatch: true }, 200);
   }
 
-  // Check if element with same name already exists
+  // Check if element already exists
   let existingElement = await db.query.elements.findFirst({
     where: eq(elements.name, finalName),
   });
@@ -128,7 +162,7 @@ app.post("/", async (c) => {
     await db.insert(elements).values({
       id: newElementId,
       name: finalName,
-      type: llmResult.type,
+      type: finalType,
       spotifySearchQuery: finalName,
       createdAt: now,
     });
@@ -140,8 +174,8 @@ app.post("/", async (c) => {
     elementA: sortedA,
     elementB: sortedB,
     result: newElementId,
-    confidence: llmResult.confidence,
-    reasoning: llmResult.reasoning,
+    confidence,
+    reasoning,
     createdAt: now,
   });
 
@@ -155,8 +189,8 @@ app.post("/", async (c) => {
       elementA: sortedA,
       elementB: sortedB,
       result: newElementId,
-      confidence: llmResult.confidence,
-      reasoning: llmResult.reasoning,
+      confidence,
+      reasoning,
     },
     result: newElement,
     lastfm: lastfmData,

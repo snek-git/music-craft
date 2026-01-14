@@ -5,6 +5,65 @@ interface CombineResult {
   type: "genre" | "artist";
 }
 
+interface CandidatesResult {
+  candidates: string[];
+}
+
+export async function suggestCandidates(
+  artistA: string,
+  artistB: string,
+  count = 5
+): Promise<string[]> {
+  const prompt = `You are a music expert. Suggest ${count} artists that could bridge the gap between these two very different artists:
+
+Artist A: ${artistA}
+Artist B: ${artistB}
+
+Think about:
+- Artists who blend elements of both styles
+- Artists influenced by both
+- Artists in adjacent genres that connect them
+
+Return ONLY a JSON array of artist names, no explanation:
+["Artist 1", "Artist 2", "Artist 3", "Artist 4", "Artist 5"]`;
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "anthropic/claude-haiku-4.5",
+      max_tokens: 200,
+      temperature: 0.8,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: { message: string };
+  };
+
+  if (data.error) {
+    console.error("OpenRouter error:", data.error.message);
+    return [];
+  }
+
+  const text = data.choices?.[0]?.message?.content ?? "";
+
+  try {
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+    const parsed = JSON.parse(jsonMatch[0]) as string[];
+    return parsed.filter((s) => typeof s === "string").slice(0, count);
+  } catch {
+    console.error("Failed to parse candidates:", text);
+    return [];
+  }
+}
+
 interface ElementInput {
   name: string;
   type: string;
@@ -15,7 +74,8 @@ interface ElementInput {
 export async function combineElements(
   elementA: ElementInput,
   elementB: ElementInput,
-  failedNames: string[] = []
+  failedNames: string[] = [],
+  excludeArtists: string[] = []
 ): Promise<CombineResult | null> {
   // genre + genre = genre, otherwise artist
   const outputType = (elementA.type === "genre" && elementB.type === "genre") ? "genre" : "artist";

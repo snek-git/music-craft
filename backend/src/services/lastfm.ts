@@ -43,6 +43,52 @@ export async function getArtist(artistName: string): Promise<LastFmArtist | null
   };
 }
 
+export interface SimilarArtist {
+  name: string;
+  match: number; // 0-1 similarity score
+}
+
+export async function getSimilarArtists(artistName: string, limit = 50): Promise<SimilarArtist[]> {
+  const params = new URLSearchParams({
+    method: "artist.getsimilar",
+    artist: artistName,
+    api_key: process.env.LASTFM_API_KEY!,
+    format: "json",
+    limit: limit.toString(),
+  });
+
+  try {
+    const res = await fetch(`${BASE_URL}?${params}`);
+    const text = await res.text();
+
+    let data: {
+      similarartists?: {
+        artist: Array<{ name: string; match: string }>;
+      };
+      error?: number;
+    };
+
+    try {
+      data = JSON.parse(text);
+    } catch {
+      console.error(`Failed to parse Last.fm response for ${artistName}:`, text.slice(0, 100));
+      return [];
+    }
+
+    if (data.error || !data.similarartists?.artist) {
+      return [];
+    }
+
+    return data.similarartists.artist.map((a) => ({
+      name: a.name,
+      match: parseFloat(a.match),
+    }));
+  } catch (e) {
+    console.error(`Failed to fetch similar artists for ${artistName}:`, e);
+    return [];
+  }
+}
+
 export async function searchArtist(query: string): Promise<LastFmArtist | null> {
   const params = new URLSearchParams({
     method: "artist.search",

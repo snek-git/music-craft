@@ -30,9 +30,17 @@
     spotifyUrl: string;
   }
 
+  interface LoadingElement {
+    instanceId: string;
+    x: number;
+    y: number;
+    elementA: string;
+    elementB: string;
+  }
+
   let allElements: Element[] = $state([]);
   let canvas: CanvasElement[] = $state([]);
-  let loading: { x: number; y: number } | null = $state(null);
+  let loadingCombinations: LoadingElement[] = $state([]);
   let result: any = $state(null);
 
   let dragging: { el: CanvasElement | Element; isNew: boolean; offsetX: number; offsetY: number } | null = $state(null);
@@ -109,27 +117,46 @@
   }
 
   // Spotify auth functions
-  async function checkAuth() {
-    try {
-      const res = await fetch("/api/auth/me", { credentials: "include" });
-      const data = await res.json();
-      user = data.user;
-    } catch (error) {
-      console.error("Failed to check auth:", error);
-    }
+  const API_URL = "http://127.0.0.1:3001";
+
+  function getToken(): string | null {
+    return localStorage.getItem("auth_token");
   }
 
-  function login() {
-    window.location.href = "/api/auth/login";
+  function setToken(token: string) {
+    localStorage.setItem("auth_token", token);
+  }
+
+  function clearToken() {
+    localStorage.removeItem("auth_token");
+  }
+
+  async function checkAuth() {
+    const token = getToken();
+    if (!token) {
+      user = null;
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      user = data.user;
+      if (!data.user) {
+        clearToken();
+      }
+    } catch (error) {
+      console.error("Failed to check auth:", error);
+      clearToken();
+      user = null;
+    }
   }
 
   async function logout() {
-    try {
-      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-      user = null;
-    } catch (error) {
-      console.error("Failed to logout:", error);
-    }
+    clearToken();
+    user = null;
   }
 
   async function openImportModal() {
@@ -137,8 +164,9 @@
     selectedArtists = new Set();
     loadingTopArtists = true;
     try {
-      const res = await fetch("/api/spotify/top-artists?time_range=medium_term&limit=50", {
-        credentials: "include",
+      const token = getToken();
+      const res = await fetch(`${API_URL}/api/spotify/top-artists?time_range=medium_term&limit=50`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       topArtists = data.artists || [];
@@ -160,14 +188,25 @@
     selectedArtists = newSelected;
   }
 
+  function selectAllArtists() {
+    selectedArtists = new Set(topArtists.map(a => a.id));
+  }
+
+  function deselectAllArtists() {
+    selectedArtists = new Set();
+  }
+
   async function importSelectedArtists() {
     if (selectedArtists.size === 0) return;
     importingArtists = true;
     try {
-      const res = await fetch("/api/spotify/import", {
+      const token = getToken();
+      const res = await fetch(`${API_URL}/api/spotify/import`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ artistIds: Array.from(selectedArtists) }),
       });
       const data = await res.json();
@@ -179,9 +218,16 @@
 
         showImportModal = false;
         selectedArtists = new Set();
+
+        const artistCount = data.artists?.imported?.length || 0;
+        const genreCount = data.genres?.imported?.length || 0;
+        const parts = [];
+        if (artistCount > 0) parts.push(`${artistCount} artist${artistCount !== 1 ? 's' : ''}`);
+        if (genreCount > 0) parts.push(`${genreCount} genre${genreCount !== 1 ? 's' : ''}`);
+
         result = {
           imported: true,
-          message: `Imported ${data.total} artist${data.total !== 1 ? 's' : ''}${data.skipped?.length ? ` (${data.skipped.length} already existed)` : ''}`
+          message: parts.length > 0 ? `Imported ${parts.join(' and ')}` : 'Nothing new to import'
         };
       }
     } catch (error) {
@@ -197,6 +243,15 @@
   }
 
   onMount(async () => {
+    // Check for token in URL (OAuth callback)
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get("token");
+    if (token) {
+      setToken(token);
+      // Clear token from URL
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
     const res = await fetch("/api/elements");
     allElements = await res.json();
 
@@ -311,8 +366,19 @@
   }
 
   async function combineElements(a: Element, b: Element, x: number, y: number) {
-    loading = { x, y };
     nearTarget = null;
+
+    // Create a loading placeholder
+    const loadingId = crypto.randomUUID();
+    const loadingEl: LoadingElement = {
+      instanceId: loadingId,
+      x,
+      y,
+      elementA: a.name,
+      elementB: b.name,
+    };
+    loadingCombinations = [...loadingCombinations, loadingEl];
+
     try {
       const res = await fetch("/api/combine", {
         method: "POST",
@@ -331,7 +397,8 @@
         result = { noMatch: true, message: "No match found" };
       }
     } finally {
-      loading = null;
+      // Remove the loading placeholder
+      loadingCombinations = loadingCombinations.filter(l => l.instanceId !== loadingId);
     }
   }
 
@@ -378,9 +445,9 @@
         Import from Spotify
       </button>
     {:else}
-      <button class="spotify-login-btn" onclick={login}>
+      <a href="http://127.0.0.1:3001/api/auth/login" class="spotify-login-btn">
         Login with Spotify
-      </button>
+      </a>
     {/if}
 
     {#if result?.result}
@@ -455,11 +522,17 @@
   </aside>
 
   <main class="canvas" bind:this={canvasEl}>
-    {#if loading}
-      <div class="canvas-loader" style="left: {loading.x}px; top: {loading.y}px;">
-        <div class="spinner"></div>
+    {#each loadingCombinations as loading (loading.instanceId)}
+      <div
+        class="canvas-element loading-element"
+        style="left: {loading.x}px; top: {loading.y}px;"
+      >
+        <div class="loading-content">
+          <div class="spinner-small"></div>
+          <span class="loading-text">Mixing...</span>
+        </div>
       </div>
-    {/if}
+    {/each}
 
     {#each canvas as el (el.instanceId)}
       <div
@@ -525,31 +598,40 @@
     <div class="info-overlay" onclick={closeImportModal}>
       <div class="import-modal" onclick={(e) => e.stopPropagation()}>
         <button class="info-close" onclick={closeImportModal}>&times;</button>
-        <h2>Import Top Artists from Spotify</h2>
+        <h2>Import from Spotify</h2>
+        <p class="import-desc">Add your favorite artists and their genres to your collection. These will appear in the sidebar for crafting.</p>
 
         {#if loadingTopArtists}
           <div class="import-loading">Loading your top artists...</div>
         {:else if topArtists.length === 0}
-          <p class="import-empty">No top artists found. Start listening to music on Spotify!</p>
+          <p class="import-empty">No top artists found. Listen to more music on Spotify first.</p>
         {:else}
-          <p class="import-hint">Select artists to import ({selectedArtists.size} selected)</p>
-          <div class="import-artists">
+          <div class="import-header">
+            <span class="import-hint">{selectedArtists.size} of {topArtists.length} selected</span>
+            <div class="import-select-btns">
+              <button class="select-btn" onclick={selectAllArtists}>Select All</button>
+              <button class="select-btn" onclick={deselectAllArtists}>Clear</button>
+            </div>
+          </div>
+          <div class="import-grid">
             {#each topArtists as artist (artist.id)}
               <div
-                class="import-artist"
+                class="import-card"
                 class:selected={selectedArtists.has(artist.id)}
                 onclick={() => toggleArtistSelection(artist.id)}
               >
                 {#if artist.imageUrl}
-                  <img src={artist.imageUrl} alt={artist.name} class="import-artist-img" />
+                  <img src={artist.imageUrl} alt={artist.name} class="import-card-img" />
+                {:else}
+                  <div class="import-card-img placeholder"></div>
                 {/if}
-                <div class="import-artist-info">
-                  <span class="import-artist-name">{artist.name}</span>
+                <div class="import-card-info">
+                  <span class="import-card-name">{artist.name}</span>
                   {#if artist.genres.length > 0}
-                    <span class="import-artist-genres">{artist.genres.slice(0, 2).join(", ")}</span>
+                    <span class="import-card-genres">{artist.genres.slice(0, 2).join(", ")}</span>
                   {/if}
                 </div>
-                <div class="import-artist-check">
+                <div class="import-card-check">
                   {#if selectedArtists.has(artist.id)}✓{/if}
                 </div>
               </div>
@@ -561,7 +643,7 @@
               onclick={importSelectedArtists}
               disabled={selectedArtists.size === 0 || importingArtists}
             >
-              {importingArtists ? "Importing..." : `Import ${selectedArtists.size} Artist${selectedArtists.size !== 1 ? 's' : ''}`}
+              {importingArtists ? "Importing..." : `Import ${selectedArtists.size} Artist${selectedArtists.size !== 1 ? 's' : ''} + Genres`}
             </button>
             <button class="import-cancel" onclick={closeImportModal}>Cancel</button>
           </div>
@@ -851,27 +933,39 @@
     overflow: hidden;
   }
 
-  .canvas-loader {
-    position: absolute;
-    z-index: 100;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100px;
-    height: 30px;
+  .loading-element {
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), #18181b);
+    border-color: rgba(168, 85, 247, 0.5);
+    animation: pulse-border 1.5s ease-in-out infinite;
   }
 
-  .spinner {
-    width: 24px;
-    height: 24px;
+  .loading-content {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .spinner-small {
+    width: 14px;
+    height: 14px;
     border: 2px solid #27272a;
-    border-top-color: #f472b6;
+    border-top-color: #a855f7;
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin 0.7s linear infinite;
+  }
+
+  .loading-text {
+    font-size: 0.75rem;
+    color: #a855f7;
   }
 
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+
+  @keyframes pulse-border {
+    0%, 100% { border-color: rgba(168, 85, 247, 0.4); }
+    50% { border-color: rgba(168, 85, 247, 0.7); }
   }
 
   .empty {
@@ -985,6 +1079,7 @@
 
   /* Spotify Login/User Profile */
   .spotify-login-btn, .spotify-import-btn {
+    display: block;
     width: 100%;
     background: rgba(30, 215, 96, 0.15);
     border: 1px solid rgba(30, 215, 96, 0.4);
@@ -995,6 +1090,8 @@
     font-weight: 600;
     cursor: pointer;
     transition: all 0.15s ease;
+    text-decoration: none;
+    text-align: center;
   }
 
   .spotify-login-btn:hover, .spotify-import-btn:hover {
@@ -1061,23 +1158,57 @@
     border: 1px solid #27272a;
     border-radius: 16px;
     padding: 1.5rem;
-    max-width: 600px;
+    max-width: 700px;
     width: 90%;
-    max-height: 80vh;
+    max-height: 85vh;
     overflow-y: auto;
     position: relative;
   }
 
   .import-modal h2 {
-    margin: 0 0 0.75rem;
+    margin: 0 0 0.5rem;
     font-size: 1.25rem;
     color: #1ed760;
+  }
+
+  .import-desc {
+    color: #888;
+    font-size: 0.8rem;
+    margin: 0 0 1rem;
+    line-height: 1.4;
+  }
+
+  .import-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
   }
 
   .import-hint {
     color: #666;
     font-size: 0.8rem;
-    margin-bottom: 1rem;
+  }
+
+  .import-select-btns {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .select-btn {
+    background: #27272a;
+    border: none;
+    border-radius: 6px;
+    padding: 0.4rem 0.75rem;
+    color: #999;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .select-btn:hover {
+    background: #333;
+    color: #fff;
   }
 
   .import-loading, .import-empty {
@@ -1086,78 +1217,92 @@
     text-align: center;
   }
 
-  .import-artists {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
+  .import-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0.75rem;
     margin-bottom: 1rem;
     max-height: 400px;
     overflow-y: auto;
+    padding: 0.25rem;
   }
 
-  .import-artist {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    background: #18181b;
-    border: 1px solid #27272a;
-    border-radius: 8px;
-    padding: 0.6rem;
+  .import-card {
+    background: #1f1f23;
+    border: 2px solid transparent;
+    border-radius: 10px;
+    padding: 0.5rem;
     cursor: pointer;
     transition: all 0.15s ease;
+    position: relative;
   }
 
-  .import-artist:hover {
-    background: #1f1f23;
+  .import-card:hover {
+    background: #27272a;
     border-color: rgba(30, 215, 96, 0.3);
   }
 
-  .import-artist.selected {
+  .import-card.selected {
     background: rgba(30, 215, 96, 0.1);
-    border-color: rgba(30, 215, 96, 0.5);
+    border-color: #1ed760;
   }
 
-  .import-artist-img {
-    width: 50px;
-    height: 50px;
+  .import-card-img {
+    width: 100%;
+    aspect-ratio: 1;
     border-radius: 6px;
     object-fit: cover;
+    margin-bottom: 0.5rem;
   }
 
-  .import-artist-info {
-    flex: 1;
+  .import-card-img.placeholder {
+    background: #27272a;
+  }
+
+  .import-card-info {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.15rem;
   }
 
-  .import-artist-name {
-    font-size: 0.85rem;
+  .import-card-name {
+    font-size: 0.8rem;
     font-weight: 600;
     color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .import-artist-genres {
-    font-size: 0.7rem;
+  .import-card-genres {
+    font-size: 0.65rem;
     color: #666;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .import-artist-check {
-    width: 24px;
-    height: 24px;
+  .import-card-check {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
     border: 2px solid #27272a;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.9rem;
+    font-size: 0.75rem;
     color: #1ed760;
     transition: all 0.15s ease;
   }
 
-  .import-artist.selected .import-artist-check {
+  .import-card.selected .import-card-check {
     border-color: #1ed760;
-    background: rgba(30, 215, 96, 0.2);
+    background: #1ed760;
+    color: #000;
   }
 
   .import-actions {

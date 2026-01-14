@@ -23,7 +23,7 @@ async function createSessionToken(userId: string): Promise<string> {
 // Helper to verify session token
 async function verifySessionToken(token: string): Promise<{ userId: string } | null> {
   try {
-    const payload = await verify(token, JWT_SECRET);
+    const payload = await verify(token, JWT_SECRET, "HS256");
     return { userId: payload.userId as string };
   } catch {
     return null;
@@ -32,8 +32,10 @@ async function verifySessionToken(token: string): Promise<{ userId: string } | n
 
 // GET /api/auth/login - Start OAuth flow
 app.get("/login", (c) => {
+  console.log("Login endpoint hit!");
   const state = crypto.randomUUID();
   const authUrl = getAuthorizationUrl(state);
+  console.log("Redirecting to:", authUrl);
 
   // Store state in cookie for CSRF protection
   setCookie(c, "oauth_state", state, {
@@ -48,28 +50,38 @@ app.get("/login", (c) => {
 
 // GET /api/auth/callback - Handle OAuth callback
 app.get("/callback", async (c) => {
+  console.log("Callback hit!");
+  console.log("Query params:", { code: c.req.query("code")?.slice(0,10), state: c.req.query("state"), error: c.req.query("error") });
+
   const code = c.req.query("code");
   const state = c.req.query("state");
   const error = c.req.query("error");
   const storedState = getCookie(c, "oauth_state");
+  console.log("Stored state:", storedState);
 
   // Clear state cookie
   deleteCookie(c, "oauth_state");
 
   if (error) {
+    console.log("Spotify returned error:", error);
     return c.redirect(`${FRONTEND_URL}?error=access_denied`);
   }
 
   if (!code || !state || state !== storedState) {
+    console.log("State mismatch! state:", state, "storedState:", storedState);
     return c.redirect(`${FRONTEND_URL}?error=invalid_state`);
   }
 
   try {
     // Exchange code for tokens
+    console.log("Exchanging code for tokens...");
     const tokens = await exchangeCodeForTokens(code);
+    console.log("Got tokens!");
 
     // Get user profile
+    console.log("Getting user profile...");
     const spotifyUser = await getCurrentUser(tokens.access_token);
+    console.log("Got user:", spotifyUser.display_name);
 
     // Check if user exists
     let user = await db.query.users.findFirst({
@@ -114,22 +126,18 @@ app.get("/callback", async (c) => {
     }
 
     if (!user) {
+      console.log("User creation failed!");
       return c.redirect(`${FRONTEND_URL}?error=user_creation_failed`);
     }
 
+    console.log("User found/created:", user.id);
+
     // Create session token
     const sessionToken = await createSessionToken(user.id);
+    console.log("Session token created:", sessionToken.slice(0, 20) + "...");
 
-    // Set session cookie
-    setCookie(c, "session", sessionToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Lax",
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-      path: "/",
-    });
-
-    return c.redirect(FRONTEND_URL);
+    console.log("Redirecting to frontend with token");
+    return c.redirect(`${FRONTEND_URL}?token=${sessionToken}`);
   } catch (error) {
     console.error("OAuth callback error:", error);
     return c.redirect(`${FRONTEND_URL}?error=auth_failed`);
@@ -138,7 +146,14 @@ app.get("/callback", async (c) => {
 
 // GET /api/auth/me - Get current user
 app.get("/me", async (c) => {
-  const sessionToken = getCookie(c, "session");
+  // Check Authorization header first, then fall back to cookie
+  let sessionToken = null;
+  const authHeader = c.req.header("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    sessionToken = authHeader.slice(7);
+  } else {
+    sessionToken = getCookie(c, "session");
+  }
 
   if (!sessionToken) {
     return c.json({ user: null });
@@ -146,7 +161,6 @@ app.get("/me", async (c) => {
 
   const session = await verifySessionToken(sessionToken);
   if (!session) {
-    deleteCookie(c, "session");
     return c.json({ user: null });
   }
 
