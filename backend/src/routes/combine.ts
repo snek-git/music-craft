@@ -169,6 +169,7 @@ app.post("/", combineLimiter, async (c) => {
       result: newElementId,
       confidence: llmResult.confidence,
       reasoning: llmResult.reasoning,
+      summary: llmResult.summary,
     },
     result: newElement,
     lastfm: lastfmData,
