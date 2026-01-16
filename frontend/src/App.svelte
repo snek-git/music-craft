@@ -276,6 +276,7 @@
   });
 
   function onSidebarMouseDown(e: MouseEvent, el: Element) {
+    if (e.button !== 0) return; // Only left click
     e.preventDefault();
     dragging = { el, isNew: true, offsetX: 50, offsetY: 15 };
     dragPos = { x: e.clientX, y: e.clientY };
@@ -283,6 +284,7 @@
   }
 
   function onCanvasMouseDown(e: MouseEvent, el: CanvasElement) {
+    if (e.button !== 0) return; // Only left click
     e.preventDefault();
     e.stopPropagation();
     const rect = (e.target as HTMLElement).getBoundingClientRect();
