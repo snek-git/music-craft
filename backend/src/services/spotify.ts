@@ -199,23 +199,31 @@ export interface ArtistPreview {
 // Get preview URL for an artist's top track via Deezer (no auth needed)
 export async function getArtistPreview(artistName: string): Promise<ArtistPreview | null> {
   try {
-    const searchRes = await fetch(`https://api.deezer.com/search?q=artist:"${encodeURIComponent(artistName)}"&limit=5`);
+    // First search for the artist to get their ID
+    const artistRes = await fetch(`https://api.deezer.com/search/artist?q=${encodeURIComponent(artistName)}&limit=1`);
+    if (!artistRes.ok) return null;
 
-    if (!searchRes.ok) {
-      console.log(`Preview: Deezer search failed for "${artistName}":`, searchRes.status);
+    const artistData = await artistRes.json();
+    const artist = artistData.data?.[0];
+    if (!artist) {
+      console.log(`Preview: Artist not found on Deezer: "${artistName}"`);
       return null;
     }
 
-    const data = await searchRes.json();
-    const track = data.data?.find((t: any) => t.preview);
+    // Get the artist's top tracks
+    const tracksRes = await fetch(`https://api.deezer.com/artist/${artist.id}/top?limit=10`);
+    if (!tracksRes.ok) return null;
+
+    const tracksData = await tracksRes.json();
+    const track = tracksData.data?.find((t: any) => t.preview);
 
     if (!track) {
-      console.log(`Preview: No tracks found on Deezer for "${artistName}"`);
+      console.log(`Preview: No tracks with preview for "${artistName}"`);
       return null;
     }
 
     return {
-      artistName: track.artist?.name || artistName,
+      artistName: artist.name,
       trackName: track.title,
       previewUrl: track.preview,
       albumArt: track.album?.cover_medium || track.album?.cover,
