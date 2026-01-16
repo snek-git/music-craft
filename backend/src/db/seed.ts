@@ -46,8 +46,23 @@ async function seed() {
       name TEXT NOT NULL,
       type TEXT NOT NULL CHECK(type IN ('genre', 'artist')),
       spotify_search_query TEXT,
+      is_base INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL
     )
+  `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS user_elements (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      element_id TEXT NOT NULL REFERENCES elements(id),
+      discovered_at INTEGER NOT NULL,
+      UNIQUE(user_id, element_id)
+    )
+  `);
+
+  await client.execute(`
+    CREATE INDEX IF NOT EXISTS idx_user_elements_user ON user_elements(user_id)
   `);
 
   await client.execute(`
@@ -76,6 +91,7 @@ async function seed() {
       name: genre,
       type: "genre",
       spotifySearchQuery: `genre:${genre.toLowerCase()}`,
+      isBase: true,
       createdAt: now,
     }).onConflictDoNothing();
   }
@@ -88,6 +104,7 @@ async function seed() {
       name: artist,
       type: "artist",
       spotifySearchQuery: artist,
+      isBase: true,
       createdAt: now,
     }).onConflictDoNothing();
   }

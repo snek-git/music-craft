@@ -110,6 +110,7 @@
     try {
       const res = await fetch("/api/elements", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: pendingArtist.validated, type: "artist" }),
       });
@@ -208,7 +209,7 @@
 
       if (data.success) {
         // Refresh elements list
-        const elementsRes = await fetch("/api/elements");
+        const elementsRes = await fetch("/api/elements", { credentials: "include" });
         allElements = await elementsRes.json();
 
         showImportModal = false;
@@ -244,11 +245,12 @@
       window.history.replaceState({}, "", window.location.pathname);
     }
 
-    const res = await fetch("/api/elements");
-    allElements = await res.json();
-
-    // Check auth status (cookie-based)
+    // Check auth status first (cookie-based)
     await checkAuth();
+
+    // Then fetch elements (will include user's collection if logged in)
+    const res = await fetch("/api/elements", { credentials: "include" });
+    allElements = await res.json();
 
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
@@ -374,6 +376,7 @@
     try {
       const res = await fetch("/api/combine", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ elementA: a.id, elementB: b.id }),
       });
