@@ -31,7 +31,7 @@
 ### Data
 - [ ] Export discoveries as playlist
 - [ ] Share discoveries via link
-- [ ] User accounts to save progress
+- [x] User accounts to save progress (per-user collections)
 - [ ] Discovery history/timeline
 
 ### Smarter Combinations

@@ -15,7 +15,20 @@
 - [x] SQLite database with Drizzle ORM
 - [x] Elements and combinations tables
 - [x] Combination caching (don't re-query same pairs)
-- [x] 25 seed genres
+- [x] Curated seed data (10 genres + 24 artists)
+
+### Per-User Collections
+- [x] user_elements junction table for tracking discoveries
+- [x] Anonymous users see only seed elements
+- [x] Logged-in users see seeds + their discoveries
+- [x] Combinations cached globally, results added to user's collection
+- [x] Spotify imports added to user's collection
+
+### Security
+- [x] Rate limiting (general, combine, auth, spotify endpoints)
+- [x] httpOnly cookie sessions (not localStorage)
+- [x] JWT_SECRET required (no insecure fallback)
+- [x] Input validation (length limits, type validation, parameter bounds)
 
 ### LLM Integration
 - [x] OpenRouter API with Claude Haiku 4.5
