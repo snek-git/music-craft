@@ -7,6 +7,7 @@ import combineRoutes from "./routes/combine";
 import authRoutes from "./routes/auth";
 import spotifyRoutes from "./routes/spotify";
 import { getArtist, searchArtist } from "./services/lastfm";
+import { getArtistPreview } from "./services/spotify";
 
 const app = new Hono();
 
@@ -82,6 +83,15 @@ app.get("/api/artist/:name", async (c) => {
     return c.json({ error: "Artist not found" }, 404);
   }
   return c.json(info);
+});
+
+app.get("/api/preview/:name", async (c) => {
+  const name = c.req.param("name");
+  const preview = await getArtistPreview(name);
+  if (!preview) {
+    return c.json({ error: "No preview available" }, 404);
+  }
+  return c.json(preview);
 });
 
 app.get("/health", (c) => c.json({ status: "ok" }));

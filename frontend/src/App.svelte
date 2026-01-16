@@ -38,6 +38,13 @@
     elementB: string;
   }
 
+  interface NowPlaying {
+    artistName: string;
+    trackName: string;
+    previewUrl: string;
+    albumArt?: string;
+  }
+
   let allElements: Element[] = $state([]);
   let canvas: CanvasElement[] = $state([]);
   let loadingCombinations: LoadingElement[] = $state([]);
@@ -75,6 +82,11 @@
   let loadingTopArtists = $state(false);
   let selectedArtists = $state<Set<string>>(new Set());
   let importingArtists = $state(false);
+
+  // Audio preview state
+  let nowPlaying: NowPlaying | null = $state(null);
+  let isPlaying = $state(false);
+  let audioEl: HTMLAudioElement;
 
   async function lookupArtist() {
     if (!newArtist.trim() || addingArtist) return;
@@ -307,9 +319,9 @@
       return;
     }
 
-    // If no drag movement, treat as a click to show info
+    // If no drag movement, treat as a click to play preview
     if (!dragMoved) {
-      showElementInfo(dragging.el);
+      playPreview(dragging.el);
       dragging = null;
       nearTarget = null;
       return;
@@ -423,6 +435,52 @@
 
   function closeInfo() {
     selectedInfo = null;
+  }
+
+  // Audio preview functions
+  async function playPreview(el: Element) {
+    if (el.type !== "artist") return;
+
+    // If clicking same artist, toggle play/pause
+    if (nowPlaying?.artistName === el.name) {
+      if (isPlaying) {
+        audioEl.pause();
+        isPlaying = false;
+      } else {
+        audioEl.play();
+        isPlaying = true;
+      }
+      return;
+    }
+
+    // Fetch new preview
+    try {
+      const res = await fetch(`/api/preview/${encodeURIComponent(el.name)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      nowPlaying = data;
+      if (audioEl) {
+        audioEl.src = data.previewUrl;
+        audioEl.play();
+        isPlaying = true;
+      }
+    } catch (e) {
+      console.error("Failed to load preview:", e);
+    }
+  }
+
+  function stopPreview() {
+    if (audioEl) {
+      audioEl.pause();
+      audioEl.currentTime = 0;
+    }
+    nowPlaying = null;
+    isPlaying = false;
+  }
+
+  function onAudioEnded() {
+    isPlaying = false;
   }
 </script>
 
@@ -649,6 +707,26 @@
           </div>
         {/if}
       </div>
+    </div>
+  {/if}
+
+  <!-- Hidden audio element -->
+  <audio bind:this={audioEl} onended={onAudioEnded}></audio>
+
+  <!-- Now playing indicator -->
+  {#if nowPlaying}
+    <div class="now-playing">
+      {#if nowPlaying.albumArt}
+        <img src={nowPlaying.albumArt} alt="" class="now-playing-art" />
+      {/if}
+      <div class="now-playing-info">
+        <span class="now-playing-artist">{nowPlaying.artistName}</span>
+        <span class="now-playing-track">{nowPlaying.trackName}</span>
+      </div>
+      <button class="now-playing-btn" onclick={() => isPlaying ? (audioEl.pause(), isPlaying = false) : (audioEl.play(), isPlaying = true)}>
+        {isPlaying ? "||" : "▶"}
+      </button>
+      <button class="now-playing-close" onclick={stopPreview}>&times;</button>
     </div>
   {/if}
 </div>
@@ -1345,6 +1423,86 @@
 
   .import-cancel:hover {
     background: #333;
+    color: #fff;
+  }
+
+  /* Now Playing */
+  .now-playing {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 12px;
+    padding: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    z-index: 100;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  }
+
+  .now-playing-art {
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+    object-fit: cover;
+  }
+
+  .now-playing-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    max-width: 180px;
+  }
+
+  .now-playing-artist {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #f472b6;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .now-playing-track {
+    font-size: 0.7rem;
+    color: #666;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .now-playing-btn {
+    background: rgba(244, 114, 182, 0.15);
+    border: 1px solid rgba(244, 114, 182, 0.3);
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    color: #f472b6;
+    font-size: 0.8rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+  }
+
+  .now-playing-btn:hover {
+    background: rgba(244, 114, 182, 0.25);
+  }
+
+  .now-playing-close {
+    background: none;
+    border: none;
+    color: #555;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+  }
+
+  .now-playing-close:hover {
     color: #fff;
   }
 </style>
