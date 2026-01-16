@@ -52,7 +52,12 @@ Element B: ${elementB.name} (${elementB.type})${elementB.tags?.length ? `\nTags:
 
 Think step by step:
 
-STEP 1 - Brainstorm 5 candidates with confidence scores (0.0-1.0):
+STEP 1 - Analyze the elements:
+- What is the core sonic/stylistic quality of Element A?
+- What is the core sonic/stylistic quality of Element B?
+- What would an artist who EQUALLY embodies BOTH qualities sound like?
+
+STEP 2 - Brainstorm 5 candidates with confidence scores (0.0-1.0):
 Consider: How well do they sit at the MIDDLE POINT (not just related to both)?
 - Candidate 1: [name] (confidence: X.X) - why
 - Candidate 2: [name] (confidence: X.X) - why
@@ -60,12 +65,12 @@ Consider: How well do they sit at the MIDDLE POINT (not just related to both)?
 - Candidate 4: [name] (confidence: X.X) - why
 - Candidate 5: [name] (confidence: X.X) - why
 
-STEP 2 - Reconsider each:
+STEP 3 - Reconsider each:
 - Is candidate 1 truly the middle ground or just adjacent to one side?
 - Is candidate 2 too obvious/mainstream?
 - etc.
 
-STEP 3 - Pick the best one.
+STEP 4 - Pick the best one.
 
 Requirements:
 - Must be a real artist with released music
