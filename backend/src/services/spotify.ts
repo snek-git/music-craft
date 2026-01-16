@@ -6,6 +6,10 @@ const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 
+// Client credentials token cache
+let clientToken: string | null = null;
+let clientTokenExpiry: number = 0;
+
 export interface SpotifyTokens {
   access_token: string;
   refresh_token: string;
@@ -154,4 +158,82 @@ export async function searchArtist(accessToken: string, query: string): Promise<
 
   const data = await response.json();
   return data.artists.items[0] || null;
+}
+
+// Get client credentials token (no user auth needed)
+async function getClientToken(): Promise<string> {
+  if (clientToken && Date.now() < clientTokenExpiry) {
+    return clientToken;
+  }
+
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+  });
+
+  const response = await fetch(SPOTIFY_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString("base64")}`,
+    },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to get client credentials token");
+  }
+
+  const data = await response.json();
+  clientToken = data.access_token;
+  clientTokenExpiry = Date.now() + (data.expires_in - 60) * 1000; // refresh 1 min early
+  return clientToken;
+}
+
+export interface ArtistPreview {
+  artistName: string;
+  trackName: string;
+  previewUrl: string;
+  albumArt?: string;
+}
+
+// Get preview URL for an artist's top track (no user auth needed)
+export async function getArtistPreview(artistName: string): Promise<ArtistPreview | null> {
+  const token = await getClientToken();
+
+  // Search for artist
+  const searchParams = new URLSearchParams({
+    q: artistName,
+    type: "artist",
+    limit: "1",
+  });
+
+  const searchRes = await fetch(`${SPOTIFY_API_BASE}/search?${searchParams.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!searchRes.ok) return null;
+
+  const searchData = await searchRes.json();
+  const artist = searchData.artists?.items?.[0];
+  if (!artist) return null;
+
+  // Get top tracks
+  const topTracksRes = await fetch(`${SPOTIFY_API_BASE}/artists/${artist.id}/top-tracks?market=US`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!topTracksRes.ok) return null;
+
+  const topTracksData = await topTracksRes.json();
+
+  // Find first track with a preview URL
+  const trackWithPreview = topTracksData.tracks?.find((t: any) => t.preview_url);
+  if (!trackWithPreview) return null;
+
+  return {
+    artistName: artist.name,
+    trackName: trackWithPreview.name,
+    previewUrl: trackWithPreview.preview_url,
+    albumArt: trackWithPreview.album?.images?.[1]?.url || trackWithPreview.album?.images?.[0]?.url,
+  };
 }
