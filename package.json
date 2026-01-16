@@ -1,0 +1,13 @@
+{
+  "name": "music-craft",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["frontend", "backend"],
+  "scripts": {
+    "dev": "concurrently \"bun run dev:backend\" \"bun run dev:frontend\"",
+    "dev:frontend": "cd frontend && bun run dev",
+    "dev:backend": "cd backend && bun run dev",
+    "build": "cd frontend && bun run build",
+    "start": "cd backend && bun run src/index.ts"
+  }
+}

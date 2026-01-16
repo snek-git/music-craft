@@ -129,7 +129,7 @@
   }
 
   // Spotify auth functions
-  const API_URL = "http://127.0.0.1:3001";
+  const API_URL = "";
 
   function getToken(): string | null {
     return localStorage.getItem("auth_token");
@@ -503,7 +503,7 @@
         Import from Spotify
       </button>
     {:else}
-      <a href="http://127.0.0.1:3001/api/auth/login" class="spotify-login-btn">
+      <a href="/api/auth/login" class="spotify-login-btn">
         Login with Spotify
       </a>
     {/if}

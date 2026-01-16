@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { serveStatic } from "hono/bun";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { elements } from "./db/schema";
@@ -11,8 +12,12 @@ import { getArtistPreview } from "./services/spotify";
 
 const app = new Hono();
 
+const isProduction = process.env.NODE_ENV === "production";
+
 app.use("/*", cors({
-  origin: ["http://127.0.0.1:5173", "http://localhost:5173"],
+  origin: isProduction
+    ? [process.env.CORS_ORIGIN || "https://music-craft.fly.dev"]
+    : ["http://127.0.0.1:5173", "http://localhost:5173"],
   credentials: true,
 }));
 
@@ -96,9 +101,17 @@ app.get("/api/preview/:name", async (c) => {
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
+// Serve static files in production
+if (isProduction) {
+  app.use("/*", serveStatic({ root: "./public" }));
+
+  // SPA fallback - serve index.html for all non-API routes
+  app.get("*", serveStatic({ path: "./public/index.html" }));
+}
+
 export default {
   port: 3001,
   fetch: app.fetch,
 };
 
-console.log("Backend running on http://localhost:3001");
+console.log(`Backend running on http://localhost:3001 (${isProduction ? "production" : "development"})`);
