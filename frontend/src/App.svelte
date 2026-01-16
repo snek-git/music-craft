@@ -725,7 +725,12 @@
     {#if result?.result}
       <button class="discovery-popup" class:genre={result.result.type === "genre"} class:artist={result.result.type === "artist"} onclick={() => result = null}>
         <span class="discovery-icon">!</span>
-        <span class="discovery-name">{result.result.name}</span>
+        <div class="discovery-content">
+          <span class="discovery-name">{result.result.name}</span>
+          {#if result.combination?.summary}
+            <span class="discovery-summary">{result.combination.summary}</span>
+          {/if}
+        </div>
       </button>
     {:else if result?.imported}
       <button class="discovery-popup success" onclick={() => result = null}>
@@ -1649,8 +1654,20 @@
     border-color: rgba(239, 68, 68, 0.4);
   }
 
+  .discovery-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+  }
+
   .discovery-name {
     font-weight: 500;
+  }
+
+  .discovery-summary {
+    font-size: 0.75rem;
+    color: #888;
   }
 
   /* Mobile menu button */

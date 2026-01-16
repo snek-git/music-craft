@@ -1,6 +1,7 @@
 interface CombineResult {
   name: string;
   reasoning: string;
+  summary: string;
   confidence: number;
   type: "genre" | "artist";
 }
@@ -40,6 +41,7 @@ Respond with ONLY valid JSON:
 {
   "name": "Genre Name",
   "reasoning": "One sentence on why they fit",
+  "summary": "~10 words explaining the mix",
   "confidence": 0.0-1.0
 }`
     : `You are a music discovery expert. Find an artist that sits at the TRUE intersection of these two elements.
@@ -65,6 +67,7 @@ Respond with ONLY valid JSON:
 {
   "name": "Artist Name",
   "reasoning": "How they specifically blend qualities of both A and B",
+  "summary": "~10 words explaining why this artist fits",
   "confidence": 0.0-1.0
 }`;
 
@@ -96,11 +99,11 @@ Respond with ONLY valid JSON:
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON found");
-    const parsed = JSON.parse(jsonMatch[0]) as { name: string; reasoning: string; confidence: number };
+    const parsed = JSON.parse(jsonMatch[0]) as { name: string; reasoning: string; summary?: string; confidence: number };
     if (parsed.name === "NO_MATCH") {
       return null;
     }
-    return { ...parsed, type: outputType };
+    return { ...parsed, summary: parsed.summary || "", type: outputType };
   } catch {
     console.error("Failed to parse LLM response:", text);
     return null;
