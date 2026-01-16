@@ -110,16 +110,10 @@ app.post("/import", async (c) => {
     const topArtists = await getTopArtists(user.accessToken, "medium_term", 50);
     const artistsToImport = topArtists.filter((a) => artistIds.includes(a.id));
 
-    const importedArtists: string[] = [];
-    const skippedArtists: string[] = [];
-    const importedGenres: string[] = [];
-    const skippedGenres: string[] = [];
-
     // Collect all unique genres from selected artists
     const allGenres = new Set<string>();
     for (const artist of artistsToImport) {
       for (const genre of artist.genres) {
-        // Capitalize first letter of each word
         const formattedGenre = genre
           .split(" ")
           .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -128,54 +122,47 @@ app.post("/import", async (c) => {
       }
     }
 
-    // Import genres
-    for (const genre of allGenres) {
-      const existing = await db.query.elements.findFirst({
-        where: eq(elements.name, genre),
-      });
+    // Get all existing elements in ONE query
+    const existingElements = await db.select({ name: elements.name }).from(elements);
+    const existingNames = new Set(existingElements.map((e) => e.name));
 
-      if (existing) {
-        skippedGenres.push(genre);
-        continue;
-      }
+    // Filter out existing ones
+    const newGenres = [...allGenres].filter((g) => !existingNames.has(g));
+    const newArtists = artistsToImport.filter((a) => !existingNames.has(a.name));
 
-      const id = crypto.randomUUID();
-      await db.insert(elements).values({
-        id,
+    // Batch insert all new genres and artists
+    const now = new Date();
+    const newElements = [
+      ...newGenres.map((genre) => ({
+        id: crypto.randomUUID(),
         name: genre,
-        type: "genre",
-        createdAt: new Date(),
-      });
-      importedGenres.push(genre);
-    }
-
-    // Import artists
-    for (const artist of artistsToImport) {
-      const existing = await db.query.elements.findFirst({
-        where: eq(elements.name, artist.name),
-      });
-
-      if (existing) {
-        skippedArtists.push(artist.name);
-        continue;
-      }
-
-      const id = crypto.randomUUID();
-      await db.insert(elements).values({
-        id,
+        type: "genre" as const,
+        createdAt: now,
+      })),
+      ...newArtists.map((artist) => ({
+        id: crypto.randomUUID(),
         name: artist.name,
-        type: "artist",
+        type: "artist" as const,
         spotifySearchQuery: artist.name,
-        createdAt: new Date(),
-      });
-      importedArtists.push(artist.name);
+        createdAt: now,
+      })),
+    ];
+
+    if (newElements.length > 0) {
+      await db.insert(elements).values(newElements);
     }
 
     return c.json({
       success: true,
-      artists: { imported: importedArtists, skipped: skippedArtists },
-      genres: { imported: importedGenres, skipped: skippedGenres },
-      total: importedArtists.length + importedGenres.length,
+      artists: {
+        imported: newArtists.map((a) => a.name),
+        skipped: artistsToImport.filter((a) => existingNames.has(a.name)).map((a) => a.name),
+      },
+      genres: {
+        imported: newGenres,
+        skipped: [...allGenres].filter((g) => existingNames.has(g)),
+      },
+      total: newElements.length,
     });
   } catch (error) {
     console.error("Failed to import:", error);
