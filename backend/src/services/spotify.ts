@@ -198,42 +198,60 @@ export interface ArtistPreview {
 
 // Get preview URL for an artist's top track (no user auth needed)
 export async function getArtistPreview(artistName: string): Promise<ArtistPreview | null> {
-  const token = await getClientToken();
+  try {
+    const token = await getClientToken();
 
-  // Search for artist
-  const searchParams = new URLSearchParams({
-    q: artistName,
-    type: "artist",
-    limit: "1",
-  });
+    // Search for artist
+    const searchParams = new URLSearchParams({
+      q: artistName,
+      type: "artist",
+      limit: "1",
+    });
 
-  const searchRes = await fetch(`${SPOTIFY_API_BASE}/search?${searchParams.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+    const searchRes = await fetch(`${SPOTIFY_API_BASE}/search?${searchParams.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
-  if (!searchRes.ok) return null;
+    if (!searchRes.ok) {
+      console.log(`Preview: Spotify search failed for "${artistName}":`, searchRes.status);
+      return null;
+    }
 
-  const searchData = await searchRes.json();
-  const artist = searchData.artists?.items?.[0];
-  if (!artist) return null;
+    const searchData = await searchRes.json();
+    const artist = searchData.artists?.items?.[0];
+    if (!artist) {
+      console.log(`Preview: Artist not found on Spotify: "${artistName}"`);
+      return null;
+    }
 
-  // Get top tracks
-  const topTracksRes = await fetch(`${SPOTIFY_API_BASE}/artists/${artist.id}/top-tracks?market=US`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+    // Try multiple markets to find a preview
+    const markets = ["US", "GB", "DE", "FR", ""];
 
-  if (!topTracksRes.ok) return null;
+    for (const market of markets) {
+      const marketParam = market ? `?market=${market}` : "";
+      const topTracksRes = await fetch(`${SPOTIFY_API_BASE}/artists/${artist.id}/top-tracks${marketParam}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-  const topTracksData = await topTracksRes.json();
+      if (!topTracksRes.ok) continue;
 
-  // Find first track with a preview URL
-  const trackWithPreview = topTracksData.tracks?.find((t: any) => t.preview_url);
-  if (!trackWithPreview) return null;
+      const topTracksData = await topTracksRes.json();
+      const trackWithPreview = topTracksData.tracks?.find((t: any) => t.preview_url);
 
-  return {
-    artistName: artist.name,
-    trackName: trackWithPreview.name,
-    previewUrl: trackWithPreview.preview_url,
-    albumArt: trackWithPreview.album?.images?.[1]?.url || trackWithPreview.album?.images?.[0]?.url,
-  };
+      if (trackWithPreview) {
+        return {
+          artistName: artist.name,
+          trackName: trackWithPreview.name,
+          previewUrl: trackWithPreview.preview_url,
+          albumArt: trackWithPreview.album?.images?.[1]?.url || trackWithPreview.album?.images?.[0]?.url,
+        };
+      }
+    }
+
+    console.log(`Preview: No tracks with preview URLs for "${artistName}" (${artist.name})`);
+    return null;
+  } catch (error) {
+    console.error(`Preview error for "${artistName}":`, error);
+    return null;
+  }
 }
