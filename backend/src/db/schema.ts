@@ -23,9 +23,10 @@ export const elements = sqliteTable("elements", {
 });
 
 // Tracks which elements a user has discovered/unlocked
+// userId is a local UUID stored in cookie, not linked to users table
 export const userElements = sqliteTable("user_elements", {
   id: text("id").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id),
+  userId: text("user_id").notNull(),
   elementId: text("element_id").notNull().references(() => elements.id),
   discoveredAt: integer("discovered_at", { mode: "timestamp" }).notNull(),
 });

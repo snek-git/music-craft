@@ -70,15 +70,41 @@ async function seed() {
     }
   }
 
-  await client.execute(`
-    CREATE TABLE IF NOT EXISTS user_elements (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id),
-      element_id TEXT NOT NULL REFERENCES elements(id),
-      discovered_at INTEGER NOT NULL,
-      UNIQUE(user_id, element_id)
-    )
-  `);
+  // Migration: recreate user_elements without foreign key on user_id
+  // (user_id is now a local UUID, not in users table)
+  const tableInfo = await client.execute(`PRAGMA table_info(user_elements)`);
+  if (tableInfo.rows.length > 0) {
+    // Table exists - check if we need to migrate by looking for the FK constraint
+    const fkList = await client.execute(`PRAGMA foreign_key_list(user_elements)`);
+    const hasUserFk = fkList.rows.some((row: any) => row.table === 'users');
+
+    if (hasUserFk) {
+      console.log("Migrating user_elements table to remove users FK constraint...");
+      // Recreate table without the FK constraint
+      await client.execute(`CREATE TABLE user_elements_new (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        element_id TEXT NOT NULL REFERENCES elements(id),
+        discovered_at INTEGER NOT NULL,
+        UNIQUE(user_id, element_id)
+      )`);
+      await client.execute(`INSERT INTO user_elements_new SELECT * FROM user_elements`);
+      await client.execute(`DROP TABLE user_elements`);
+      await client.execute(`ALTER TABLE user_elements_new RENAME TO user_elements`);
+      console.log("Migration complete");
+    }
+  } else {
+    // Create fresh table without FK on user_id
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS user_elements (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        element_id TEXT NOT NULL REFERENCES elements(id),
+        discovered_at INTEGER NOT NULL,
+        UNIQUE(user_id, element_id)
+      )
+    `);
+  }
 
   await client.execute(`
     CREATE INDEX IF NOT EXISTS idx_user_elements_user ON user_elements(user_id)
