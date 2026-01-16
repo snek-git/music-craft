@@ -1,12 +1,9 @@
 import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { elements } from "./schema";
 
 const client = createClient({
   url: process.env.TURSO_DATABASE_URL || "file:music-craft.db",
   authToken: process.env.TURSO_AUTH_TOKEN,
 });
-const db = drizzle(client);
 
 const SEED_GENRES = [
   "Rock", "Electronic", "Hip-Hop", "Jazz", "Classical",
@@ -63,6 +60,16 @@ async function seed() {
     )
   `);
 
+  // Migration: add is_base column if it doesn't exist
+  try {
+    await client.execute(`ALTER TABLE elements ADD COLUMN is_base INTEGER DEFAULT 0`);
+    console.log("Added is_base column to elements table");
+  } catch (e: any) {
+    if (!e.message?.includes("duplicate column")) {
+      // Column already exists, ignore
+    }
+  }
+
   await client.execute(`
     CREATE TABLE IF NOT EXISTS user_elements (
       id TEXT PRIMARY KEY,
@@ -93,32 +100,55 @@ async function seed() {
     CREATE INDEX IF NOT EXISTS idx_combo_elements ON combinations(element_a, element_b)
   `);
 
-  const now = new Date();
+  // Mark all existing non-seed elements as not base
+  await client.execute(`UPDATE elements SET is_base = 0 WHERE is_base IS NULL`);
+
+  const now = Date.now();
 
   console.log("Seeding genres...");
   for (const genre of SEED_GENRES) {
-    const id = crypto.randomUUID();
-    await db.insert(elements).values({
-      id,
-      name: genre,
-      type: "genre",
-      spotifySearchQuery: `genre:${genre.toLowerCase()}`,
-      isBase: true,
-      createdAt: now,
-    }).onConflictDoNothing();
+    // Check if exists
+    const existing = await client.execute({
+      sql: `SELECT id FROM elements WHERE name = ?`,
+      args: [genre],
+    });
+
+    if (existing.rows.length > 0) {
+      // Update existing to be base element
+      await client.execute({
+        sql: `UPDATE elements SET is_base = 1 WHERE name = ?`,
+        args: [genre],
+      });
+    } else {
+      // Insert new
+      await client.execute({
+        sql: `INSERT INTO elements (id, name, type, spotify_search_query, is_base, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
+        args: [crypto.randomUUID(), genre, "genre", `genre:${genre.toLowerCase()}`, now],
+      });
+    }
   }
 
   console.log("Seeding artists...");
   for (const artist of SEED_ARTISTS) {
-    const id = crypto.randomUUID();
-    await db.insert(elements).values({
-      id,
-      name: artist,
-      type: "artist",
-      spotifySearchQuery: artist,
-      isBase: true,
-      createdAt: now,
-    }).onConflictDoNothing();
+    // Check if exists
+    const existing = await client.execute({
+      sql: `SELECT id FROM elements WHERE name = ?`,
+      args: [artist],
+    });
+
+    if (existing.rows.length > 0) {
+      // Update existing to be base element
+      await client.execute({
+        sql: `UPDATE elements SET is_base = 1 WHERE name = ?`,
+        args: [artist],
+      });
+    } else {
+      // Insert new
+      await client.execute({
+        sql: `INSERT INTO elements (id, name, type, spotify_search_query, is_base, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
+        args: [crypto.randomUUID(), artist, "artist", artist, now],
+      });
+    }
   }
 
   console.log(`Seeded ${SEED_GENRES.length} genres and ${SEED_ARTISTS.length} artists`);

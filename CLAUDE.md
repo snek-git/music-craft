@@ -46,14 +46,18 @@ music-craft/
 │   │   │   ├── index.ts     # Drizzle + Turso connection
 │   │   │   ├── schema.ts    # Database schema
 │   │   │   └── seed.ts      # Seed script for tables + initial data
+│   │   ├── middleware/
+│   │   │   └── rateLimit.ts # Rate limiting middleware
 │   │   ├── routes/
 │   │   │   ├── auth.ts      # Spotify OAuth flow
 │   │   │   ├── combine.ts   # Element combination logic
 │   │   │   └── spotify.ts   # Spotify import endpoints
-│   │   └── services/
-│   │       ├── lastfm.ts    # Last.fm API integration
-│   │       ├── llm.ts       # OpenRouter/Claude for combinations
-│   │       └── spotify.ts   # Spotify API integration
+│   │   ├── services/
+│   │   │   ├── lastfm.ts    # Last.fm API integration
+│   │   │   ├── llm.ts       # OpenRouter/Claude for combinations
+│   │   │   └── spotify.ts   # Spotify API integration
+│   │   └── utils/
+│   │       └── userCollection.ts  # Per-user collection helpers
 │   ├── drizzle.config.ts    # Drizzle kit config
 │   └── .env                 # Environment variables (not committed)
 ├── Dockerfile               # Multi-stage Bun build
@@ -129,8 +133,13 @@ The connection falls back to `file:music-craft.db` for local development if Turs
 ### Schema
 
 - **users**: Spotify OAuth data (tokens, profile info)
-- **elements**: Genres and artists (name, type)
+- **elements**: Genres and artists (name, type, isBase flag for seeds)
+- **user_elements**: Per-user discovery tracking (userId, elementId)
 - **combinations**: Cached combination results (element_a + element_b = result)
+
+### Seed Data
+
+10 genres + 24 iconic artists (2-3 per genre). Seed elements have `isBase: true` and are visible to all users.
 
 ## Deployment
 
@@ -147,6 +156,12 @@ The connection falls back to `file:music-craft.db` for local development if Turs
 
 ## Key Features
 
+### Per-User Collections
+- Anonymous users see only seed elements (10 genres + 24 artists)
+- Logged-in users see seeds + their personal discoveries
+- Combinations cached globally for efficiency, but results added to user's collection
+- `user_elements` junction table tracks discoveries per user
+
 ### Click-to-Preview Audio
 - Left-click any artist to play a 30-second Spotify preview
 - Uses Spotify client credentials (no user login required)
@@ -155,6 +170,7 @@ The connection falls back to `file:music-craft.db` for local development if Turs
 ### Spotify Import
 - OAuth login to import user's top 50 artists + genres
 - Batched database queries for fast import (2 queries instead of 100+)
+- Imported elements added to user's personal collection
 
 ### LLM Combinations
 - Claude Haiku via OpenRouter for suggesting combinations
@@ -166,6 +182,25 @@ The connection falls back to `file:music-craft.db` for local development if Turs
 ### Combination Caching
 - Results cached by sorted element pair IDs
 - "Rock + Jazz" and "Jazz + Rock" use the same cache
+
+## Security
+
+### Authentication
+- Spotify OAuth for login
+- JWT sessions stored in httpOnly cookies (not localStorage)
+- `JWT_SECRET` environment variable required (no fallback)
+
+### Rate Limiting
+- General API: 100 requests/minute
+- Combine endpoint (LLM): 20 requests/minute
+- Auth endpoints: 10 requests/15 minutes
+- Spotify endpoints: 30 requests/minute
+
+### Input Validation
+- Name length limit: 200 characters
+- Element type validation (genre/artist only)
+- Spotify limit parameter clamped to 1-50
+- Array size limits on batch operations
 
 ## Common Issues
 
