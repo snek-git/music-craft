@@ -92,6 +92,9 @@
   // Mobile menu state
   let sidebarOpen = $state(false);
 
+  // First-time help tooltip
+  let showHelp = $state(false);
+
   // Touch long press handling
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
   let longPressTriggered = $state(false);
@@ -526,6 +529,14 @@
           allElements = [...allElements, data.result];
         }
         spawnElement(data.result, x, y);
+
+        // Show help tooltip on first successful combine
+        if (!localStorage.getItem("seenHelp")) {
+          setTimeout(() => {
+            showHelp = true;
+            localStorage.setItem("seenHelp", "1");
+          }, 2000);
+        }
       } else if (data.noMatch) {
         result = { noMatch: true, message: "No match found" };
       }
@@ -721,6 +732,18 @@
 
     {#if canvas.length === 0 && !dragging}
       <div class="empty">Drag elements here</div>
+    {/if}
+
+    <!-- First-time help tooltip -->
+    {#if showHelp}
+      <button class="help-tooltip" onclick={() => showHelp = false}>
+        <div class="help-title">Tip</div>
+        <div class="help-row desktop-only"><span class="help-key">Click</span> artist to preview</div>
+        <div class="help-row desktop-only"><span class="help-key">Right-click</span> for info</div>
+        <div class="help-row mobile-only"><span class="help-key">Tap</span> artist to preview</div>
+        <div class="help-row mobile-only"><span class="help-key">Hold</span> for info</div>
+        <div class="help-dismiss">tap to dismiss</div>
+      </button>
     {/if}
 
     <!-- Discovery speech bubble -->
@@ -1126,6 +1149,64 @@
     transform: translate(-50%, -50%);
     color: #27272a;
     font-size: 1.25rem;
+  }
+
+  .help-tooltip {
+    position: absolute;
+    bottom: 1.5rem;
+    left: 1.5rem;
+    background: #18181b;
+    border: 1px solid #3f3f46;
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    z-index: 20;
+    cursor: pointer;
+    animation: fadeSlideIn 0.3s ease-out;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  }
+
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .help-title {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #a855f7;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+  }
+
+  .help-row {
+    font-size: 0.8rem;
+    color: #a1a1aa;
+    margin-bottom: 0.25rem;
+  }
+
+  .help-key {
+    color: #fff;
+    font-weight: 500;
+  }
+
+  .help-dismiss {
+    font-size: 0.65rem;
+    color: #52525b;
+    margin-top: 0.5rem;
+  }
+
+  .mobile-only {
+    display: none;
+  }
+
+  @media (max-width: 768px) {
+    .desktop-only {
+      display: none;
+    }
+    .mobile-only {
+      display: block;
+    }
   }
 
   .info-overlay {
