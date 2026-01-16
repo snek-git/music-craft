@@ -1,6 +1,7 @@
 # Music Craft
 
 Infinite Craft-style music discovery app. Combine genres and artists to discover new music at their intersection.
+
 Inspired by [little alchemy](https://littlealchemy.com/), [infinite craft](https://neal.fun/infinite-craft/) and [every noise at once](https://everynoise.com/).
 
 ## How it works
