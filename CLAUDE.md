@@ -132,31 +132,12 @@ The connection falls back to `file:music-craft.db` for local development if Turs
 - **elements**: Genres and artists (name, type)
 - **combinations**: Cached combination results (element_a + element_b = result)
 
-## Deployment (Fly.io)
+## Deployment
 
-```bash
-# Deploy
-flyctl deploy
-
-# Set secrets
-flyctl secrets set \
-  TURSO_DATABASE_URL="libsql://..." \
-  TURSO_AUTH_TOKEN="..." \
-  OPENROUTER_API_KEY="..." \
-  LASTFM_API_KEY="..." \
-  SPOTIFY_CLIENT_ID="..." \
-  SPOTIFY_CLIENT_SECRET="..." \
-  SPOTIFY_REDIRECT_URI="https://music-craft.snek.page/api/auth/callback" \
-  FRONTEND_URL="https://music-craft.snek.page" \
-  CORS_ORIGIN="https://music-craft.snek.page" \
-  JWT_SECRET="..."
-
-# View logs
-flyctl logs -a music-craft
-
-# SSH into machine
-flyctl ssh console -a music-craft
-```
+- **CI/CD**: GitHub Actions auto-deploys to Fly.io on merge to `master`
+- **Hosting**: Fly.io (app name: `music-craft`)
+- **Domain**: `music-craft.snek.page` via Cloudflare DNS
+- **Secrets**: Set on Fly.io via `flyctl secrets set`
 
 ### Custom Domain (Cloudflare)
 
@@ -199,6 +180,13 @@ Ensure `SPOTIFY_REDIRECT_URI` matches what's configured in the Spotify Developer
 
 ### CORS errors
 Check that `CORS_ORIGIN` matches your frontend URL (including https).
+
+## Git Workflow
+
+- **Only create a new branch when the previous PR has been created** (not just pushed)
+- Bundle related changes into a single PR when possible
+- Branch naming: `claude/<feature-name>-<session-id>`
+- CI auto-deploys to Fly.io on merge to `master`
 
 ## Development Notes
 
