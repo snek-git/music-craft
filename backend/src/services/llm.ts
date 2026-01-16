@@ -44,30 +44,40 @@ Respond with ONLY valid JSON:
   "summary": "~10 words explaining the mix",
   "confidence": 0.0-1.0
 }`
-    : `You are a music discovery expert. Find an artist that sits at the TRUE intersection of these two elements.
+    : `You are a music discovery expert. Find an artist at the TRUE intersection of these two elements.
 
 Element A: ${elementA.name} (${elementA.type})${elementA.tags?.length ? `\nTags: ${elementA.tags.slice(0, 5).join(", ")}` : ""}${elementA.bio ? `\nBio: ${elementA.bio.replace(/<[^>]*>/g, "").slice(0, 300)}` : ""}
 
 Element B: ${elementB.name} (${elementB.type})${elementB.tags?.length ? `\nTags: ${elementB.tags.slice(0, 5).join(", ")}` : ""}${elementB.bio ? `\nBio: ${elementB.bio.replace(/<[^>]*>/g, "").slice(0, 300)}` : ""}
 
 Think step by step:
-1. What is the core sonic/stylistic quality of Element A?
-2. What is the core sonic/stylistic quality of Element B?
-3. What would an artist who EQUALLY embodies BOTH qualities sound like?
-4. Who is a real artist that fits that exact middle point?
+
+STEP 1 - Brainstorm 5 candidates with confidence scores (0.0-1.0):
+Consider: How well do they sit at the MIDDLE POINT (not just related to both)?
+- Candidate 1: [name] (confidence: X.X) - why
+- Candidate 2: [name] (confidence: X.X) - why
+- Candidate 3: [name] (confidence: X.X) - why
+- Candidate 4: [name] (confidence: X.X) - why
+- Candidate 5: [name] (confidence: X.X) - why
+
+STEP 2 - Reconsider each:
+- Is candidate 1 truly the middle ground or just adjacent to one side?
+- Is candidate 2 too obvious/mainstream?
+- etc.
+
+STEP 3 - Pick the best one.
 
 Requirements:
 - Must be a real artist with released music
-- NOT just "related to both" - must be the MIDDLE GROUND between them
-- Avoid obvious/mainstream choices - dig deeper into the intersection
-- Think: if you drew a line between A and B, who sits at the center?
+- NOT just "related to both" - must be the MIDDLE GROUND
+- Avoid obvious/mainstream choices
 - If no good match exists, respond with {"name": "NO_MATCH"}${failedNote}
 
-Respond with ONLY valid JSON:
+After your reasoning, respond with ONLY this JSON:
 {
   "name": "Artist Name",
-  "reasoning": "How they specifically blend qualities of both A and B",
-  "summary": "~10 words explaining why this artist fits",
+  "reasoning": "How they blend both A and B",
+  "summary": "~10 words explaining the mix",
   "confidence": 0.0-1.0
 }`;
 
@@ -79,7 +89,7 @@ Respond with ONLY valid JSON:
     },
     body: JSON.stringify({
       model: "anthropic/claude-haiku-4.5",
-      max_tokens: 512,
+      max_tokens: 1024,
       messages: [{ role: "user", content: prompt }],
     }),
   });
