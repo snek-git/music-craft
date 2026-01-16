@@ -636,27 +636,6 @@
       </a>
     {/if}
 
-    {#if result?.result}
-      <div class="discovery">
-        <span class="label">Discovered</span>
-        <strong>{result.result.name}</strong>
-        <span class="type-badge" class:genre={result.result.type === "genre"} class:artist={result.result.type === "artist"}>
-          {result.result.type}
-        </span>
-        <p class="reasoning">{result.combination?.reasoning}</p>
-      </div>
-    {:else if result?.imported}
-      <div class="discovery success">
-        <span class="label">Import Success</span>
-        <p class="reasoning">{result.message}</p>
-      </div>
-    {:else if result?.noMatch}
-      <div class="discovery no-match">
-        <span class="label">No match</span>
-        <p class="reasoning">Couldn't find a good combination</p>
-      </div>
-    {/if}
-
     <div class="category">
       <h2>Genres <span class="count">{genres.length}</span></h2>
       <div class="elements">
@@ -740,6 +719,24 @@
 
     {#if canvas.length === 0 && !dragging}
       <div class="empty">Drag elements here</div>
+    {/if}
+
+    <!-- Discovery popup -->
+    {#if result?.result}
+      <button class="discovery-popup" class:genre={result.result.type === "genre"} class:artist={result.result.type === "artist"} onclick={() => result = null}>
+        <span class="discovery-icon">!</span>
+        <span class="discovery-name">{result.result.name}</span>
+      </button>
+    {:else if result?.imported}
+      <button class="discovery-popup success" onclick={() => result = null}>
+        <span class="discovery-icon">✓</span>
+        <span class="discovery-name">{result.message}</span>
+      </button>
+    {:else if result?.noMatch}
+      <button class="discovery-popup no-match" onclick={() => result = null}>
+        <span class="discovery-icon">✕</span>
+        <span class="discovery-name">No match</span>
+      </button>
     {/if}
   </main>
 
@@ -891,60 +888,6 @@
   .hint {
     color: #555;
     font-size: 0.75rem;
-  }
-
-  .discovery {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid #27272a;
-    border-radius: 12px;
-    padding: 0.875rem;
-  }
-
-  .discovery .label {
-    color: #888;
-    font-size: 0.65rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .discovery strong {
-    display: block;
-    margin: 0.25rem 0;
-    font-size: 1rem;
-  }
-
-  .discovery .type-badge {
-    display: inline-block;
-    font-size: 0.6rem;
-    padding: 0.15rem 0.4rem;
-    border-radius: 4px;
-    text-transform: uppercase;
-  }
-
-  .discovery .type-badge.genre {
-    background: rgba(251, 191, 36, 0.2);
-    color: #fbbf24;
-  }
-
-  .discovery .type-badge.artist {
-    background: rgba(244, 114, 182, 0.2);
-    color: #f472b6;
-  }
-
-  .discovery .reasoning {
-    color: #666;
-    font-size: 0.75rem;
-    margin: 0.5rem 0 0;
-    line-height: 1.4;
-  }
-
-  .discovery.no-match {
-    border-color: #ef4444;
-    background: rgba(239, 68, 68, 0.05);
-  }
-
-  .discovery.no-match .label {
-    color: #ef4444;
   }
 
   .category h2 {
@@ -1354,15 +1297,6 @@
     color: #f472b6;
   }
 
-  .discovery.success {
-    border-color: #4ade80;
-    background: rgba(74, 222, 128, 0.05);
-  }
-
-  .discovery.success .label {
-    color: #4ade80;
-  }
-
   /* Import Modal */
   .import-modal {
     background: #18181b;
@@ -1637,6 +1571,86 @@
 
   .now-playing-close:hover {
     color: #fff;
+  }
+
+  /* Discovery popup */
+  .discovery-popup {
+    position: absolute;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    z-index: 10;
+    animation: popIn 0.2s ease-out;
+    color: #fff;
+    font-size: 0.85rem;
+  }
+
+  @keyframes popIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(0.95); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  }
+
+  .discovery-popup:hover {
+    background: #27272a;
+  }
+
+  .discovery-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 0.9rem;
+  }
+
+  .discovery-popup.genre .discovery-icon {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+  }
+
+  .discovery-popup.artist .discovery-icon {
+    background: rgba(244, 114, 182, 0.2);
+    color: #f472b6;
+  }
+
+  .discovery-popup.success .discovery-icon {
+    background: rgba(74, 222, 128, 0.2);
+    color: #4ade80;
+  }
+
+  .discovery-popup.no-match .discovery-icon {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+  }
+
+  .discovery-popup.genre {
+    border-color: rgba(251, 191, 36, 0.4);
+  }
+
+  .discovery-popup.artist {
+    border-color: rgba(244, 114, 182, 0.4);
+  }
+
+  .discovery-popup.success {
+    border-color: rgba(74, 222, 128, 0.4);
+  }
+
+  .discovery-popup.no-match {
+    border-color: rgba(239, 68, 68, 0.4);
+  }
+
+  .discovery-name {
+    font-weight: 500;
   }
 
   /* Mobile menu button */
