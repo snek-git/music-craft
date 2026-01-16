@@ -196,60 +196,30 @@ export interface ArtistPreview {
   albumArt?: string;
 }
 
-// Get preview URL for an artist's top track (no user auth needed)
+// Get preview URL for an artist's top track via Deezer (no auth needed)
 export async function getArtistPreview(artistName: string): Promise<ArtistPreview | null> {
   try {
-    const token = await getClientToken();
-
-    // Search for artist
-    const searchParams = new URLSearchParams({
-      q: artistName,
-      type: "artist",
-      limit: "1",
-    });
-
-    const searchRes = await fetch(`${SPOTIFY_API_BASE}/search?${searchParams.toString()}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const searchRes = await fetch(`https://api.deezer.com/search?q=artist:"${encodeURIComponent(artistName)}"&limit=5`);
 
     if (!searchRes.ok) {
-      console.log(`Preview: Spotify search failed for "${artistName}":`, searchRes.status);
+      console.log(`Preview: Deezer search failed for "${artistName}":`, searchRes.status);
       return null;
     }
 
-    const searchData = await searchRes.json();
-    const artist = searchData.artists?.items?.[0];
-    if (!artist) {
-      console.log(`Preview: Artist not found on Spotify: "${artistName}"`);
+    const data = await searchRes.json();
+    const track = data.data?.find((t: any) => t.preview);
+
+    if (!track) {
+      console.log(`Preview: No tracks found on Deezer for "${artistName}"`);
       return null;
     }
 
-    // Try multiple markets to find a preview
-    const markets = ["US", "GB", "DE", "FR", ""];
-
-    for (const market of markets) {
-      const marketParam = market ? `?market=${market}` : "";
-      const topTracksRes = await fetch(`${SPOTIFY_API_BASE}/artists/${artist.id}/top-tracks${marketParam}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!topTracksRes.ok) continue;
-
-      const topTracksData = await topTracksRes.json();
-      const trackWithPreview = topTracksData.tracks?.find((t: any) => t.preview_url);
-
-      if (trackWithPreview) {
-        return {
-          artistName: artist.name,
-          trackName: trackWithPreview.name,
-          previewUrl: trackWithPreview.preview_url,
-          albumArt: trackWithPreview.album?.images?.[1]?.url || trackWithPreview.album?.images?.[0]?.url,
-        };
-      }
-    }
-
-    console.log(`Preview: No tracks with preview URLs for "${artistName}" (${artist.name})`);
-    return null;
+    return {
+      artistName: track.artist?.name || artistName,
+      trackName: track.title,
+      previewUrl: track.preview,
+      albumArt: track.album?.cover_medium || track.album?.cover,
+    };
   } catch (error) {
     console.error(`Preview error for "${artistName}":`, error);
     return null;
