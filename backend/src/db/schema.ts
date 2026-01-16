@@ -18,7 +18,16 @@ export const elements = sqliteTable("elements", {
   name: text("name").notNull(),
   type: text("type", { enum: ["genre", "artist"] }).notNull(),
   spotifySearchQuery: text("spotify_search_query"),
+  isBase: integer("is_base", { mode: "boolean" }).default(false), // Seed elements everyone can see
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+// Tracks which elements a user has discovered/unlocked
+export const userElements = sqliteTable("user_elements", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  elementId: text("element_id").notNull().references(() => elements.id),
+  discoveredAt: integer("discovered_at", { mode: "timestamp" }).notNull(),
 });
 
 export const combinations = sqliteTable("combinations", {
@@ -34,3 +43,4 @@ export const combinations = sqliteTable("combinations", {
 export type User = typeof users.$inferSelect;
 export type Element = typeof elements.$inferSelect;
 export type Combination = typeof combinations.$inferSelect;
+export type UserElement = typeof userElements.$inferSelect;

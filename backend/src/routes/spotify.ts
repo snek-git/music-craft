@@ -1,11 +1,12 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getCookie } from "hono/cookie";
 import { verify } from "hono/jwt";
 import { db } from "../db";
 import { users, elements } from "../db/schema";
 import { getTopArtists, refreshAccessToken } from "../services/spotify";
 import { spotifyLimiter } from "../middleware/rateLimit";
+import { addManyToUserCollection } from "../utils/userCollection";
 
 const app = new Hono();
 
@@ -147,12 +148,12 @@ app.post("/import", spotifyLimiter, async (c) => {
     }
 
     // Get all existing elements in ONE query
-    const existingElements = await db.select({ name: elements.name }).from(elements);
-    const existingNames = new Set(existingElements.map((e) => e.name));
+    const existingElements = await db.select({ id: elements.id, name: elements.name }).from(elements);
+    const existingByName = new Map(existingElements.map((e) => [e.name, e.id]));
 
-    // Filter out existing ones
-    const newGenres = [...allGenres].filter((g) => !existingNames.has(g));
-    const newArtists = artistsToImport.filter((a) => !existingNames.has(a.name));
+    // Filter out existing ones for creation
+    const newGenres = [...allGenres].filter((g) => !existingByName.has(g));
+    const newArtists = artistsToImport.filter((a) => !existingByName.has(a.name));
 
     // Batch insert all new genres and artists
     const now = new Date();
@@ -161,6 +162,7 @@ app.post("/import", spotifyLimiter, async (c) => {
         id: crypto.randomUUID(),
         name: genre,
         type: "genre" as const,
+        isBase: false,
         createdAt: now,
       })),
       ...newArtists.map((artist) => ({
@@ -168,12 +170,36 @@ app.post("/import", spotifyLimiter, async (c) => {
         name: artist.name,
         type: "artist" as const,
         spotifySearchQuery: artist.name,
+        isBase: false,
         createdAt: now,
       })),
     ];
 
     if (newElements.length > 0) {
       await db.insert(elements).values(newElements);
+    }
+
+    // Collect all element IDs to add to user's collection (new + existing)
+    const allElementIds: string[] = [];
+
+    // Add new element IDs
+    for (const el of newElements) {
+      allElementIds.push(el.id);
+    }
+
+    // Add existing element IDs for genres and artists being imported
+    for (const genre of allGenres) {
+      const existingId = existingByName.get(genre);
+      if (existingId) allElementIds.push(existingId);
+    }
+    for (const artist of artistsToImport) {
+      const existingId = existingByName.get(artist.name);
+      if (existingId) allElementIds.push(existingId);
+    }
+
+    // Add all to user's collection
+    if (allElementIds.length > 0) {
+      await addManyToUserCollection(user.id, allElementIds);
     }
 
     return c.json({

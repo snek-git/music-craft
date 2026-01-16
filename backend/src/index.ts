@@ -1,15 +1,16 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
-import { eq } from "drizzle-orm";
+import { eq, or, inArray } from "drizzle-orm";
 import { db } from "./db";
-import { elements } from "./db/schema";
+import { elements, userElements } from "./db/schema";
 import combineRoutes from "./routes/combine";
 import authRoutes from "./routes/auth";
 import spotifyRoutes from "./routes/spotify";
 import { getArtist, searchArtist } from "./services/lastfm";
 import { getArtistPreview } from "./services/spotify";
 import { generalLimiter } from "./middleware/rateLimit";
+import { getUserIdFromSession, addToUserCollection } from "./utils/userCollection";
 
 const app = new Hono();
 
@@ -41,8 +42,30 @@ app.use("/*", cors({
 app.use("/api/*", generalLimiter);
 
 app.get("/api/elements", async (c) => {
-  const allElements = await db.select().from(elements);
-  return c.json(allElements);
+  const userId = await getUserIdFromSession(c);
+
+  if (!userId) {
+    // Anonymous users only see base/seed elements
+    const baseElements = await db.select().from(elements).where(eq(elements.isBase, true));
+    return c.json(baseElements);
+  }
+
+  // Logged-in users see base elements + their discoveries
+  const userDiscoveries = await db.select({ elementId: userElements.elementId })
+    .from(userElements)
+    .where(eq(userElements.userId, userId));
+
+  const discoveredIds = userDiscoveries.map(d => d.elementId);
+
+  let userElementsList;
+  if (discoveredIds.length > 0) {
+    userElementsList = await db.select().from(elements)
+      .where(or(eq(elements.isBase, true), inArray(elements.id, discoveredIds)));
+  } else {
+    userElementsList = await db.select().from(elements).where(eq(elements.isBase, true));
+  }
+
+  return c.json(userElementsList);
 });
 
 app.get("/api/elements/lookup", async (c) => {
@@ -59,6 +82,7 @@ app.get("/api/elements/lookup", async (c) => {
 });
 
 app.post("/api/elements", async (c) => {
+  const userId = await getUserIdFromSession(c);
   const { name, type } = await c.req.json<{ name: string; type: "genre" | "artist" }>();
 
   const nameResult = validateName(name);
@@ -69,11 +93,15 @@ app.post("/api/elements", async (c) => {
   // Validate type
   const validType = VALID_ELEMENT_TYPES.includes(type as any) ? type : "artist";
 
-  // Check if already exists
+  // Check if already exists globally
   const existing = await db.query.elements.findFirst({
     where: eq(elements.name, nameResult.value),
   });
   if (existing) {
+    // Add to user's collection if logged in
+    if (userId) {
+      await addToUserCollection(userId, existing.id);
+    }
     return c.json(existing);
   }
 
@@ -93,8 +121,14 @@ app.post("/api/elements", async (c) => {
     name: finalName,
     type: validType,
     spotifySearchQuery: finalName,
+    isBase: false,
     createdAt: new Date(),
   });
+
+  // Add to user's collection if logged in
+  if (userId) {
+    await addToUserCollection(userId, id);
+  }
 
   const created = await db.query.elements.findFirst({ where: eq(elements.id, id) });
   return c.json(created);
