@@ -4,12 +4,14 @@ import { db } from "../db";
 import { elements, combinations } from "../db/schema";
 import { combineElements } from "../services/llm";
 import { getArtist, searchArtist } from "../services/lastfm";
+import { combineLimiter } from "../middleware/rateLimit";
 
 const app = new Hono();
 
 const MAX_RETRIES = 3;
 
-app.post("/", async (c) => {
+// Stricter rate limit for combine endpoint (LLM calls are expensive)
+app.post("/", combineLimiter, async (c) => {
   const { elementA: elementAId, elementB: elementBId } = await c.req.json<{
     elementA: string;
     elementB: string;

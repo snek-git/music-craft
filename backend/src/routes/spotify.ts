@@ -5,10 +5,14 @@ import { verify } from "hono/jwt";
 import { db } from "../db";
 import { users, elements } from "../db/schema";
 import { getTopArtists, refreshAccessToken } from "../services/spotify";
+import { spotifyLimiter } from "../middleware/rateLimit";
 
 const app = new Hono();
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET environment variable is required");
+}
 
 // Middleware to require authentication
 async function requireAuth(c: any, next: () => Promise<void>) {
@@ -71,10 +75,19 @@ async function requireAuth(c: any, next: () => Promise<void>) {
 app.use("*", requireAuth);
 
 // GET /api/spotify/top-artists - Get user's top artists
-app.get("/top-artists", async (c) => {
+app.get("/top-artists", spotifyLimiter, async (c) => {
   const user = c.get("user");
-  const timeRange = c.req.query("time_range") as "short_term" | "medium_term" | "long_term" || "medium_term";
-  const limit = parseInt(c.req.query("limit") || "50");
+
+  // Validate time_range parameter
+  const timeRangeParam = c.req.query("time_range");
+  const validTimeRanges = ["short_term", "medium_term", "long_term"] as const;
+  const timeRange = validTimeRanges.includes(timeRangeParam as any)
+    ? (timeRangeParam as "short_term" | "medium_term" | "long_term")
+    : "medium_term";
+
+  // Validate and clamp limit parameter (max 50, min 1)
+  const rawLimit = parseInt(c.req.query("limit") || "50");
+  const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 50);
 
   try {
     const topArtists = await getTopArtists(user.accessToken, timeRange, limit);
@@ -96,11 +109,22 @@ app.get("/top-artists", async (c) => {
 });
 
 // POST /api/spotify/import - Import selected artists and their genres
-app.post("/import", async (c) => {
+app.post("/import", spotifyLimiter, async (c) => {
   const { artistIds } = await c.req.json<{ artistIds: string[] }>();
 
   if (!artistIds || !Array.isArray(artistIds)) {
     return c.json({ error: "artistIds array is required" }, 400);
+  }
+
+  // Validate artistIds - max 50, must be strings, max 100 chars each
+  if (artistIds.length > 50) {
+    return c.json({ error: "Maximum 50 artists can be imported at once" }, 400);
+  }
+  const validIds = artistIds.filter(
+    (id) => typeof id === "string" && id.length > 0 && id.length <= 100
+  );
+  if (validIds.length !== artistIds.length) {
+    return c.json({ error: "Invalid artist IDs provided" }, 400);
   }
 
   const user = c.get("user");
