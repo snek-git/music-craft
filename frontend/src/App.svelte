@@ -724,12 +724,9 @@
     {/if}
 
     <!-- Discovery speech bubble -->
-    {#if result?.result}
-      <button class="discovery-bubble" style="left: {resultPos.x}px; top: {resultPos.y - 60}px;" onclick={() => result = null}>
-        <span class="bubble-name">{result.result.name}</span>
-        {#if result.combination?.summary}
-          <span class="bubble-summary">{result.combination.summary}</span>
-        {/if}
+    {#if result?.result && result.combination?.summary}
+      <button class="discovery-bubble" class:genre={result.result.type === "genre"} class:artist={result.result.type === "artist"} style="left: {resultPos.x}px; top: {resultPos.y - 45}px;" onclick={() => result = null}>
+        {result.combination.summary}
         <span class="bubble-arrow"></span>
       </button>
     {:else if result?.noMatch}
@@ -1580,17 +1577,27 @@
     flex-direction: column;
     align-items: center;
     gap: 0.2rem;
-    background: #6366f1;
     border: none;
-    border-radius: 12px;
-    padding: 0.5rem 0.85rem;
+    border-radius: 10px;
+    padding: 0.4rem 0.75rem;
     cursor: pointer;
     z-index: 10;
     animation: bubblePop 0.25s ease-out;
-    color: #fff;
-    font-size: 0.8rem;
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+    color: #000;
+    font-size: 0.75rem;
     transform: translateX(-50%);
+    max-width: 220px;
+    text-align: center;
+  }
+
+  .discovery-bubble.genre {
+    background: #fbbf24;
+    box-shadow: 0 4px 12px rgba(251, 191, 36, 0.5);
+  }
+
+  .discovery-bubble.artist {
+    background: #f472b6;
+    box-shadow: 0 4px 12px rgba(244, 114, 182, 0.5);
   }
 
   @keyframes bubblePop {
@@ -1598,28 +1605,22 @@
     to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
   }
 
-  .discovery-bubble:hover {
-    background: #4f46e5;
+  .discovery-bubble.genre:hover {
+    background: #f59e0b;
+  }
+
+  .discovery-bubble.artist:hover {
+    background: #ec4899;
   }
 
   .discovery-bubble.no-match {
-    background: #dc2626;
-    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
+    background: #ef4444;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.5);
+    color: #fff;
   }
 
   .discovery-bubble.no-match:hover {
-    background: #b91c1c;
-  }
-
-  .bubble-name {
-    font-weight: 600;
-  }
-
-  .bubble-summary {
-    font-size: 0.7rem;
-    opacity: 0.85;
-    text-align: center;
-    max-width: 200px;
+    background: #dc2626;
   }
 
   .bubble-arrow {
@@ -1631,19 +1632,27 @@
     height: 0;
     border-left: 8px solid transparent;
     border-right: 8px solid transparent;
-    border-top: 8px solid #6366f1;
+    border-top: 8px solid #f472b6;
+  }
+
+  .discovery-bubble.genre .bubble-arrow {
+    border-top-color: #fbbf24;
+  }
+
+  .discovery-bubble.genre:hover .bubble-arrow {
+    border-top-color: #f59e0b;
+  }
+
+  .discovery-bubble.artist:hover .bubble-arrow {
+    border-top-color: #ec4899;
   }
 
   .discovery-bubble.no-match .bubble-arrow {
-    border-top-color: #dc2626;
-  }
-
-  .discovery-bubble:hover .bubble-arrow {
-    border-top-color: #4f46e5;
+    border-top-color: #ef4444;
   }
 
   .discovery-bubble.no-match:hover .bubble-arrow {
-    border-top-color: #b91c1c;
+    border-top-color: #dc2626;
   }
 
   /* Mobile menu button */
