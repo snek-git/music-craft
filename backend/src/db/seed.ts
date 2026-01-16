@@ -10,16 +10,28 @@ const db = drizzle(client);
 
 const SEED_GENRES = [
   "Rock", "Electronic", "Hip-Hop", "Jazz", "Classical",
-  "Ambient", "Metal", "Folk", "R&B", "Punk",
-  "Country", "Blues", "Soul", "Reggae", "Indie"
+  "Pop", "R&B", "Metal", "Country", "Folk"
 ];
 
 const SEED_ARTISTS = [
-  "Radiohead", "Kendrick Lamar", "Björk", "Aphex Twin", "Daft Punk",
-  "Tame Impala", "Frank Ocean", "Bon Iver", "Flying Lotus", "Portishead",
-  "LCD Soundsystem", "Beach House", "Massive Attack", "Boards of Canada", "Burial",
-  "King Krule", "Tyler, The Creator", "FKA Twigs", "James Blake", "Grimes",
-  "Mac DeMarco", "Car Seat Headrest", "Thundercat", "Anderson .Paak", "Daniel Caesar"
+  // Rock
+  "The Beatles", "Queen",
+  // Electronic
+  "Daft Punk", "Kraftwerk",
+  // Hip-Hop
+  "Kanye West", "Kendrick Lamar",
+  // Jazz
+  "Miles Davis", "John Coltrane",
+  // Pop
+  "Michael Jackson", "Dua Lipa",
+  // R&B
+  "Stevie Wonder", "Beyoncé",
+  // Metal
+  "Black Sabbath", "Metallica",
+  // Country
+  "Johnny Cash", "Dolly Parton",
+  // Folk
+  "Bob Dylan", "Joni Mitchell",
 ];
 
 async function seed() {
