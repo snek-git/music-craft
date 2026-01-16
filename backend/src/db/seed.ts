@@ -1,9 +1,12 @@
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
+import { createClient } from "@libsql/client";
+import { drizzle } from "drizzle-orm/libsql";
 import { elements } from "./schema";
 
-const sqlite = new Database("music-craft.db");
-const db = drizzle(sqlite);
+const client = createClient({
+  url: process.env.TURSO_DATABASE_URL || "file:music-craft.db",
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
+const db = drizzle(client);
 
 const SEED_GENRES = [
   "Rock", "Electronic", "Hip-Hop", "Jazz", "Classical",
@@ -22,7 +25,7 @@ const SEED_ARTISTS = [
 async function seed() {
   console.log("Creating tables...");
 
-  sqlite.exec(`
+  await client.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       spotify_id TEXT NOT NULL UNIQUE,
@@ -34,16 +37,20 @@ async function seed() {
       token_expires_at INTEGER NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
-    );
+    )
+  `);
 
+  await client.execute(`
     CREATE TABLE IF NOT EXISTS elements (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       type TEXT NOT NULL CHECK(type IN ('genre', 'artist')),
       spotify_search_query TEXT,
       created_at INTEGER NOT NULL
-    );
+    )
+  `);
 
+  await client.execute(`
     CREATE TABLE IF NOT EXISTS combinations (
       id TEXT PRIMARY KEY,
       element_a TEXT NOT NULL REFERENCES elements(id),
@@ -52,9 +59,11 @@ async function seed() {
       confidence REAL NOT NULL,
       reasoning TEXT,
       created_at INTEGER NOT NULL
-    );
+    )
+  `);
 
-    CREATE INDEX IF NOT EXISTS idx_combo_elements ON combinations(element_a, element_b);
+  await client.execute(`
+    CREATE INDEX IF NOT EXISTS idx_combo_elements ON combinations(element_a, element_b)
   `);
 
   const now = new Date();

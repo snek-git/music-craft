@@ -18,7 +18,3 @@ primary_region = 'sjc'
   memory = '512mb'
   cpu_kind = 'shared'
   cpus = 1
-
-[mounts]
-  source = 'music_craft_data'
-  destination = '/app/backend/data'
