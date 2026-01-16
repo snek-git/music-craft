@@ -76,7 +76,7 @@ Respond with ONLY valid JSON:
     },
     body: JSON.stringify({
       model: "anthropic/claude-haiku-4.5",
-      max_tokens: 256,
+      max_tokens: 512,
       messages: [{ role: "user", content: prompt }],
     }),
   });
