@@ -437,6 +437,11 @@
     selectedInfo = null;
   }
 
+  function onRightClick(e: MouseEvent, el: Element) {
+    e.preventDefault();
+    showElementInfo(el);
+  }
+
   // Audio preview functions
   async function playPreview(el: Element) {
     if (el.type !== "artist") return;
@@ -569,6 +574,7 @@
           <div
             class="element artist"
             onmousedown={(e) => onSidebarMouseDown(e, el)}
+            oncontextmenu={(e) => onRightClick(e, el)}
           >
             {el.name}
           </div>
@@ -600,6 +606,7 @@
         class:highlight={nearTarget?.instanceId === el.instanceId}
         style="left: {el.x}px; top: {el.y}px;"
         onmousedown={(e) => onCanvasMouseDown(e, el)}
+        oncontextmenu={(e) => onRightClick(e, el)}
       >
         {el.name}
       </div>
