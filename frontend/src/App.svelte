@@ -49,6 +49,7 @@
   let canvas: CanvasElement[] = $state([]);
   let loadingCombinations: LoadingElement[] = $state([]);
   let result: any = $state(null);
+  let resultPos = $state({ x: 0, y: 0 });
 
   let dragging: { el: CanvasElement | Element; isNew: boolean; offsetX: number; offsetY: number } | null = $state(null);
   let dragPos = $state({ x: 0, y: 0 });
@@ -518,6 +519,7 @@
       });
       const data = await res.json();
       result = data;
+      resultPos = { x, y };
 
       if (data.result) {
         if (!allElements.find(e => e.name === data.result.name)) {
@@ -721,26 +723,19 @@
       <div class="empty">Drag elements here</div>
     {/if}
 
-    <!-- Discovery popup -->
+    <!-- Discovery speech bubble -->
     {#if result?.result}
-      <button class="discovery-popup" class:genre={result.result.type === "genre"} class:artist={result.result.type === "artist"} onclick={() => result = null}>
-        <span class="discovery-icon">!</span>
-        <div class="discovery-content">
-          <span class="discovery-name">{result.result.name}</span>
-          {#if result.combination?.summary}
-            <span class="discovery-summary">{result.combination.summary}</span>
-          {/if}
-        </div>
-      </button>
-    {:else if result?.imported}
-      <button class="discovery-popup success" onclick={() => result = null}>
-        <span class="discovery-icon">✓</span>
-        <span class="discovery-name">{result.message}</span>
+      <button class="discovery-bubble" style="left: {resultPos.x}px; top: {resultPos.y - 60}px;" onclick={() => result = null}>
+        <span class="bubble-name">{result.result.name}</span>
+        {#if result.combination?.summary}
+          <span class="bubble-summary">{result.combination.summary}</span>
+        {/if}
+        <span class="bubble-arrow"></span>
       </button>
     {:else if result?.noMatch}
-      <button class="discovery-popup no-match" onclick={() => result = null}>
-        <span class="discovery-icon">✕</span>
-        <span class="discovery-name">No match</span>
+      <button class="discovery-bubble no-match" style="left: {resultPos.x}px; top: {resultPos.y - 40}px;" onclick={() => result = null}>
+        <span class="bubble-name">No match found</span>
+        <span class="bubble-arrow"></span>
       </button>
     {/if}
   </main>
@@ -1578,96 +1573,77 @@
     color: #fff;
   }
 
-  /* Discovery popup */
-  .discovery-popup {
+  /* Discovery speech bubble */
+  .discovery-bubble {
     position: absolute;
-    top: 1rem;
-    left: 50%;
-    transform: translateX(-50%);
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 0.5rem;
-    background: #18181b;
-    border: 1px solid #27272a;
-    border-radius: 10px;
-    padding: 0.5rem 1rem;
+    gap: 0.2rem;
+    background: #6366f1;
+    border: none;
+    border-radius: 12px;
+    padding: 0.5rem 0.85rem;
     cursor: pointer;
     z-index: 10;
-    animation: popIn 0.2s ease-out;
+    animation: bubblePop 0.25s ease-out;
     color: #fff;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+    transform: translateX(-50%);
   }
 
-  @keyframes popIn {
-    from { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(0.95); }
+  @keyframes bubblePop {
+    from { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.9); }
     to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
   }
 
-  .discovery-popup:hover {
-    background: #27272a;
+  .discovery-bubble:hover {
+    background: #4f46e5;
   }
 
-  .discovery-icon {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    font-size: 0.9rem;
+  .discovery-bubble.no-match {
+    background: #dc2626;
+    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
   }
 
-  .discovery-popup.genre .discovery-icon {
-    background: rgba(251, 191, 36, 0.2);
-    color: #fbbf24;
+  .discovery-bubble.no-match:hover {
+    background: #b91c1c;
   }
 
-  .discovery-popup.artist .discovery-icon {
-    background: rgba(244, 114, 182, 0.2);
-    color: #f472b6;
+  .bubble-name {
+    font-weight: 600;
   }
 
-  .discovery-popup.success .discovery-icon {
-    background: rgba(74, 222, 128, 0.2);
-    color: #4ade80;
+  .bubble-summary {
+    font-size: 0.7rem;
+    opacity: 0.85;
+    text-align: center;
+    max-width: 200px;
   }
 
-  .discovery-popup.no-match .discovery-icon {
-    background: rgba(239, 68, 68, 0.2);
-    color: #ef4444;
+  .bubble-arrow {
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 8px solid #6366f1;
   }
 
-  .discovery-popup.genre {
-    border-color: rgba(251, 191, 36, 0.4);
+  .discovery-bubble.no-match .bubble-arrow {
+    border-top-color: #dc2626;
   }
 
-  .discovery-popup.artist {
-    border-color: rgba(244, 114, 182, 0.4);
+  .discovery-bubble:hover .bubble-arrow {
+    border-top-color: #4f46e5;
   }
 
-  .discovery-popup.success {
-    border-color: rgba(74, 222, 128, 0.4);
-  }
-
-  .discovery-popup.no-match {
-    border-color: rgba(239, 68, 68, 0.4);
-  }
-
-  .discovery-content {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.15rem;
-  }
-
-  .discovery-name {
-    font-weight: 500;
-  }
-
-  .discovery-summary {
-    font-size: 0.75rem;
-    color: #888;
+  .discovery-bubble.no-match:hover .bubble-arrow {
+    border-top-color: #b91c1c;
   }
 
   /* Mobile menu button */
