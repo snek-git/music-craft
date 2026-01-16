@@ -23,7 +23,7 @@ const SEED_ARTISTS = [
   // Jazz
   "Miles Davis", "John Coltrane",
   // Pop
-  "Michael Jackson", "David Bowie", "Prince",
+  "Michael Jackson", "David Bowie", "Prince", "Taylor Swift", "Billie Eilish",
   // R&B
   "Stevie Wonder", "Frank Ocean",
   // Metal
