@@ -10,7 +10,7 @@ import spotifyRoutes from "./routes/spotify";
 import { getArtist, searchArtist } from "./services/lastfm";
 import { getArtistPreview } from "./services/spotify";
 import { generalLimiter } from "./middleware/rateLimit";
-import { getUserIdFromSession, addToUserCollection } from "./utils/userCollection";
+import { getOrCreateUserId, addToUserCollection } from "./utils/userCollection";
 
 const app = new Hono();
 
@@ -42,15 +42,9 @@ app.use("/*", cors({
 app.use("/api/*", generalLimiter);
 
 app.get("/api/elements", async (c) => {
-  const userId = await getUserIdFromSession(c);
+  const userId = getOrCreateUserId(c);
 
-  if (!userId) {
-    // Anonymous users only see base/seed elements
-    const baseElements = await db.select().from(elements).where(eq(elements.isBase, true));
-    return c.json(baseElements);
-  }
-
-  // Logged-in users see base elements + their discoveries
+  // Get user's discoveries
   const userDiscoveries = await db.select({ elementId: userElements.elementId })
     .from(userElements)
     .where(eq(userElements.userId, userId));
@@ -82,7 +76,7 @@ app.get("/api/elements/lookup", async (c) => {
 });
 
 app.post("/api/elements", async (c) => {
-  const userId = await getUserIdFromSession(c);
+  const userId = getOrCreateUserId(c);
   const { name, type } = await c.req.json<{ name: string; type: "genre" | "artist" }>();
 
   const nameResult = validateName(name);
@@ -98,10 +92,7 @@ app.post("/api/elements", async (c) => {
     where: eq(elements.name, nameResult.value),
   });
   if (existing) {
-    // Add to user's collection if logged in
-    if (userId) {
-      await addToUserCollection(userId, existing.id);
-    }
+    await addToUserCollection(userId, existing.id);
     return c.json(existing);
   }
 
@@ -125,10 +116,7 @@ app.post("/api/elements", async (c) => {
     createdAt: new Date(),
   });
 
-  // Add to user's collection if logged in
-  if (userId) {
-    await addToUserCollection(userId, id);
-  }
+  await addToUserCollection(userId, id);
 
   const created = await db.query.elements.findFirst({ where: eq(elements.id, id) });
   return c.json(created);

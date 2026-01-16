@@ -6,7 +6,7 @@ import { db } from "../db";
 import { users, elements } from "../db/schema";
 import { getTopArtists, refreshAccessToken } from "../services/spotify";
 import { spotifyLimiter } from "../middleware/rateLimit";
-import { addManyToUserCollection } from "../utils/userCollection";
+import { getOrCreateUserId, addManyToUserCollection } from "../utils/userCollection";
 
 const app = new Hono();
 
@@ -128,11 +128,12 @@ app.post("/import", spotifyLimiter, async (c) => {
     return c.json({ error: "Invalid artist IDs provided" }, 400);
   }
 
-  const user = c.get("user");
+  const spotifyUser = c.get("user"); // Spotify user for API access
+  const localUserId = getOrCreateUserId(c); // Local user for collection
 
   try {
     // Get top artists to find the ones to import
-    const topArtists = await getTopArtists(user.accessToken, "medium_term", 50);
+    const topArtists = await getTopArtists(spotifyUser.accessToken, "medium_term", 50);
     const artistsToImport = topArtists.filter((a) => artistIds.includes(a.id));
 
     // Collect all unique genres from selected artists
@@ -197,20 +198,20 @@ app.post("/import", spotifyLimiter, async (c) => {
       if (existingId) allElementIds.push(existingId);
     }
 
-    // Add all to user's collection
+    // Add all to user's local collection
     if (allElementIds.length > 0) {
-      await addManyToUserCollection(user.id, allElementIds);
+      await addManyToUserCollection(localUserId, allElementIds);
     }
 
     return c.json({
       success: true,
       artists: {
         imported: newArtists.map((a) => a.name),
-        skipped: artistsToImport.filter((a) => existingNames.has(a.name)).map((a) => a.name),
+        skipped: artistsToImport.filter((a) => existingByName.has(a.name)).map((a) => a.name),
       },
       genres: {
         imported: newGenres,
-        skipped: [...allGenres].filter((g) => existingNames.has(g)),
+        skipped: [...allGenres].filter((g) => existingByName.has(g)),
       },
       total: newElements.length,
     });

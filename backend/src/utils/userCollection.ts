@@ -1,21 +1,21 @@
-import { getCookie } from "hono/cookie";
-import { verify } from "hono/jwt";
+import { getCookie, setCookie } from "hono/cookie";
 import { db } from "../db";
 import { userElements } from "../db/schema";
 
-const JWT_SECRET = process.env.JWT_SECRET;
-
-// Get userId from session cookie (returns null if not logged in)
-export async function getUserIdFromSession(c: any): Promise<string | null> {
-  if (!JWT_SECRET) return null;
-  const sessionToken = getCookie(c, "session");
-  if (!sessionToken) return null;
-  try {
-    const payload = await verify(sessionToken, JWT_SECRET, "HS256");
-    return payload.userId as string;
-  } catch {
-    return null;
+// Get or create a local user ID from cookie
+export function getOrCreateUserId(c: any): string {
+  let userId = getCookie(c, "user_id");
+  if (!userId) {
+    userId = crypto.randomUUID();
+    setCookie(c, "user_id", userId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Lax",
+      maxAge: 60 * 60 * 24 * 365, // 1 year
+      path: "/",
+    });
   }
+  return userId;
 }
 
 // Add element to user's collection (idempotent)

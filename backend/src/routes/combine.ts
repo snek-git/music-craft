@@ -5,7 +5,7 @@ import { elements, combinations } from "../db/schema";
 import { combineElements } from "../services/llm";
 import { getArtist, searchArtist } from "../services/lastfm";
 import { combineLimiter } from "../middleware/rateLimit";
-import { getUserIdFromSession, addToUserCollection } from "../utils/userCollection";
+import { getOrCreateUserId, addToUserCollection } from "../utils/userCollection";
 
 const app = new Hono();
 
@@ -13,7 +13,7 @@ const MAX_RETRIES = 3;
 
 // Stricter rate limit for combine endpoint (LLM calls are expensive)
 app.post("/", combineLimiter, async (c) => {
-  const userId = await getUserIdFromSession(c);
+  const userId = getOrCreateUserId(c);
   const { elementA: elementAId, elementB: elementBId } = await c.req.json<{
     elementA: string;
     elementB: string;
@@ -50,7 +50,7 @@ app.post("/", combineLimiter, async (c) => {
       where: eq(elements.id, existing.result),
     });
     // Add to user's collection even if cached
-    if (userId && resultElement) {
+    if (resultElement) {
       await addToUserCollection(userId, resultElement.id);
     }
     return c.json({
@@ -144,9 +144,7 @@ app.post("/", combineLimiter, async (c) => {
   }
 
   // Add result to user's collection
-  if (userId) {
-    await addToUserCollection(userId, newElementId);
-  }
+  await addToUserCollection(userId, newElementId);
 
   const combinationId = crypto.randomUUID();
   await db.insert(combinations).values({
