@@ -88,6 +88,13 @@
   let isPlaying = $state(false);
   let audioEl: HTMLAudioElement;
 
+  // Mobile menu state
+  let sidebarOpen = $state(false);
+
+  // Touch long press handling
+  let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+  let longPressTriggered = $state(false);
+
   async function lookupArtist() {
     if (!newArtist.trim() || addingArtist) return;
     addingArtist = true;
@@ -254,9 +261,13 @@
 
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onTouchEnd);
     return () => {
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
     };
   });
 
@@ -274,6 +285,131 @@
     dragging = { el, isNew: false, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
     dragPos = { x: e.clientX, y: e.clientY };
     dragMoved = false;
+  }
+
+  // Touch event handlers
+  function clearLongPressTimer() {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }
+
+  function onSidebarTouchStart(e: TouchEvent, el: Element) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    dragging = { el, isNew: true, offsetX: 50, offsetY: 15 };
+    dragPos = { x: touch.clientX, y: touch.clientY };
+    dragMoved = false;
+    longPressTriggered = false;
+
+    // Start long press timer for showing info
+    clearLongPressTimer();
+    longPressTimer = setTimeout(() => {
+      if (!dragMoved && el.type === "artist") {
+        longPressTriggered = true;
+        showElementInfo(el);
+        dragging = null;
+      }
+    }, 500);
+  }
+
+  function onCanvasTouchStart(e: TouchEvent, el: CanvasElement) {
+    e.preventDefault();
+    e.stopPropagation();
+    const touch = e.touches[0];
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    dragging = { el, isNew: false, offsetX: touch.clientX - rect.left, offsetY: touch.clientY - rect.top };
+    dragPos = { x: touch.clientX, y: touch.clientY };
+    dragMoved = false;
+    longPressTriggered = false;
+
+    // Start long press timer for showing info
+    clearLongPressTimer();
+    longPressTimer = setTimeout(() => {
+      if (!dragMoved && el.type === "artist") {
+        longPressTriggered = true;
+        showElementInfo(el);
+        dragging = null;
+      }
+    }, 500);
+  }
+
+  function onTouchMove(e: TouchEvent) {
+    if (!dragging) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const dx = touch.clientX - dragPos.x;
+    const dy = touch.clientY - dragPos.y;
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      dragMoved = true;
+      clearLongPressTimer(); // Cancel long press if moved
+      sidebarOpen = false; // Close sidebar when dragging
+    }
+    dragPos = { x: touch.clientX, y: touch.clientY };
+
+    if (canvasEl) {
+      const rect = canvasEl.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      nearTarget = findNearElement(x, y, dragging.el);
+    }
+  }
+
+  function onTouchEnd(e: TouchEvent) {
+    clearLongPressTimer();
+
+    // If long press already triggered, just reset
+    if (longPressTriggered) {
+      longPressTriggered = false;
+      return;
+    }
+
+    if (!dragging || !canvasEl) {
+      dragging = null;
+      nearTarget = null;
+      return;
+    }
+
+    // Use last known position from dragPos
+    const clientX = dragPos.x;
+    const clientY = dragPos.y;
+
+    // Simple tap = play preview
+    if (!dragMoved) {
+      playPreview(dragging.el);
+      dragging = null;
+      nearTarget = null;
+      return;
+    }
+
+    const canvasRect = canvasEl.getBoundingClientRect();
+    const sidebarRect = sidebarEl?.getBoundingClientRect();
+    const x = clientX - canvasRect.left - dragging.offsetX;
+    const y = clientY - canvasRect.top - dragging.offsetY;
+
+    if (sidebarRect && !dragging.isNew && clientX >= sidebarRect.left && clientX <= sidebarRect.right) {
+      const el = dragging.el as CanvasElement;
+      canvas = canvas.filter(c => c.instanceId !== el.instanceId);
+    }
+    else if (clientX >= canvasRect.left && clientX <= canvasRect.right && clientY >= canvasRect.top && clientY <= canvasRect.bottom) {
+      if (nearTarget) {
+        const targetId = nearTarget.instanceId;
+        combineElements(dragging.el, nearTarget, nearTarget.x, nearTarget.y);
+        canvas = canvas.filter(c => c.instanceId !== targetId);
+        if (!dragging.isNew && 'instanceId' in dragging.el) {
+          canvas = canvas.filter(c => c.instanceId !== (dragging!.el as CanvasElement).instanceId);
+        }
+      } else if (dragging.isNew) {
+        spawnElement(dragging.el, x, y);
+      } else {
+        const el = dragging.el as CanvasElement;
+        canvas = canvas.map(c => c.instanceId === el.instanceId ? { ...c, x, y } : c);
+      }
+    }
+
+    dragging = null;
+    nearTarget = null;
   }
 
   function onMouseMove(e: MouseEvent) {
@@ -473,7 +609,11 @@
 </script>
 
 <div class="app">
-  <aside class="sidebar" bind:this={sidebarEl}>
+  <button class="menu-btn" onclick={() => sidebarOpen = !sidebarOpen}>
+    {sidebarOpen ? '✕' : '☰'}
+  </button>
+
+  <aside class="sidebar" class:open={sidebarOpen} bind:this={sidebarEl}>
     <h1>Music Craft</h1>
     <p class="hint">Drag to canvas, bring close to combine</p>
 
@@ -524,6 +664,7 @@
           <div
             class="element genre"
             onmousedown={(e) => onSidebarMouseDown(e, el)}
+            ontouchstart={(e) => onSidebarTouchStart(e, el)}
           >
             {el.name}
           </div>
@@ -557,6 +698,7 @@
           <div
             class="element artist"
             onmousedown={(e) => onSidebarMouseDown(e, el)}
+            ontouchstart={(e) => onSidebarTouchStart(e, el)}
             oncontextmenu={(e) => onRightClick(e, el)}
           >
             {el.name}
@@ -589,6 +731,7 @@
         class:highlight={nearTarget?.instanceId === el.instanceId}
         style="left: {el.x}px; top: {el.y}px;"
         onmousedown={(e) => onCanvasMouseDown(e, el)}
+        ontouchstart={(e) => onCanvasTouchStart(e, el)}
         oncontextmenu={(e) => onRightClick(e, el)}
       >
         {el.name}
@@ -1494,5 +1637,84 @@
 
   .now-playing-close:hover {
     color: #fff;
+  }
+
+  /* Mobile menu button */
+  .menu-btn {
+    display: none;
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 1001;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 8px;
+    width: 44px;
+    height: 44px;
+    color: #fff;
+    font-size: 1.5rem;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .menu-btn:hover {
+    background: #27272a;
+  }
+
+  /* Mobile responsive styles */
+  @media (max-width: 768px) {
+    .menu-btn {
+      display: flex;
+    }
+
+    .sidebar {
+      position: fixed;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      z-index: 1000;
+      transform: translateX(-100%);
+      transition: transform 0.3s ease;
+      width: 280px;
+    }
+
+    .sidebar.open {
+      transform: translateX(0);
+    }
+
+    .canvas {
+      width: 100%;
+    }
+
+    .now-playing {
+      left: 1rem;
+      right: 1rem;
+      bottom: 1rem;
+      max-width: none;
+    }
+
+    .now-playing-info {
+      flex: 1;
+      max-width: none;
+    }
+
+    .info-modal, .import-modal {
+      width: 95%;
+      max-height: 90vh;
+      margin: 1rem;
+    }
+
+    .import-grid {
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    }
+
+    .element, .canvas-element {
+      touch-action: none;
+    }
+
+    h1 {
+      margin-top: 2.5rem;
+    }
   }
 </style>
