@@ -131,43 +131,28 @@
   // Spotify auth functions
   const API_URL = "";
 
-  function getToken(): string | null {
-    return localStorage.getItem("auth_token");
-  }
-
-  function setToken(token: string) {
-    localStorage.setItem("auth_token", token);
-  }
-
-  function clearToken() {
-    localStorage.removeItem("auth_token");
-  }
-
   async function checkAuth() {
-    const token = getToken();
-    if (!token) {
-      user = null;
-      return;
-    }
-
     try {
       const res = await fetch(`${API_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
       const data = await res.json();
       user = data.user;
-      if (!data.user) {
-        clearToken();
-      }
     } catch (error) {
       console.error("Failed to check auth:", error);
-      clearToken();
       user = null;
     }
   }
 
   async function logout() {
-    clearToken();
+    try {
+      await fetch(`${API_URL}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
     user = null;
   }
 
@@ -176,9 +161,8 @@
     selectedArtists = new Set();
     loadingTopArtists = true;
     try {
-      const token = getToken();
       const res = await fetch(`${API_URL}/api/spotify/top-artists?time_range=medium_term&limit=50`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
       const data = await res.json();
       topArtists = data.artists || [];
@@ -212,12 +196,11 @@
     if (selectedArtists.size === 0) return;
     importingArtists = true;
     try {
-      const token = getToken();
       const res = await fetch(`${API_URL}/api/spotify/import`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ artistIds: Array.from(selectedArtists) }),
       });
@@ -255,19 +238,16 @@
   }
 
   onMount(async () => {
-    // Check for token in URL (OAuth callback)
+    // Check for auth callback (clear URL params)
     const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get("token");
-    if (token) {
-      setToken(token);
-      // Clear token from URL
+    if (urlParams.has("auth") || urlParams.has("error")) {
       window.history.replaceState({}, "", window.location.pathname);
     }
 
     const res = await fetch("/api/elements");
     allElements = await res.json();
 
-    // Check auth status
+    // Check auth status (cookie-based)
     await checkAuth();
 
     document.addEventListener("mousemove", onMouseMove);

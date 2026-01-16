@@ -9,10 +9,14 @@ import {
   exchangeCodeForTokens,
   getCurrentUser,
 } from "../services/spotify";
+import { authLimiter } from "../middleware/rateLimit";
 
 const app = new Hono();
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET environment variable is required");
+}
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://127.0.0.1:5173";
 
 // Helper to create session token
@@ -31,7 +35,7 @@ async function verifySessionToken(token: string): Promise<{ userId: string } | n
 }
 
 // GET /api/auth/login - Start OAuth flow
-app.get("/login", (c) => {
+app.get("/login", authLimiter, (c) => {
   console.log("Login endpoint hit!");
   const state = crypto.randomUUID();
   const authUrl = getAuthorizationUrl(state);
@@ -49,7 +53,7 @@ app.get("/login", (c) => {
 });
 
 // GET /api/auth/callback - Handle OAuth callback
-app.get("/callback", async (c) => {
+app.get("/callback", authLimiter, async (c) => {
   console.log("Callback hit!");
   console.log("Query params:", { code: c.req.query("code")?.slice(0,10), state: c.req.query("state"), error: c.req.query("error") });
 
@@ -136,8 +140,17 @@ app.get("/callback", async (c) => {
     const sessionToken = await createSessionToken(user.id);
     console.log("Session token created:", sessionToken.slice(0, 20) + "...");
 
-    console.log("Redirecting to frontend with token");
-    return c.redirect(`${FRONTEND_URL}?token=${sessionToken}`);
+    // Set session cookie (httpOnly for security)
+    setCookie(c, "session", sessionToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Lax",
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      path: "/",
+    });
+
+    console.log("Redirecting to frontend with session cookie");
+    return c.redirect(`${FRONTEND_URL}?auth=success`);
   } catch (error) {
     console.error("OAuth callback error:", error);
     return c.redirect(`${FRONTEND_URL}?error=auth_failed`);
