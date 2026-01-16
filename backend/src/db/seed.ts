@@ -15,17 +15,17 @@ const SEED_GENRES = [
 
 const SEED_ARTISTS = [
   // Rock
-  "The Beatles", "Queen",
+  "The Beatles", "Pink Floyd", "Radiohead",
   // Electronic
-  "Daft Punk", "Kraftwerk",
+  "Daft Punk", "Aphex Twin", "Björk",
   // Hip-Hop
   "Kanye West", "Kendrick Lamar",
   // Jazz
   "Miles Davis", "John Coltrane",
   // Pop
-  "Michael Jackson", "Dua Lipa",
+  "Michael Jackson", "David Bowie", "Prince",
   // R&B
-  "Stevie Wonder", "Beyoncé",
+  "Stevie Wonder", "Frank Ocean",
   // Metal
   "Black Sabbath", "Metallica",
   // Country
