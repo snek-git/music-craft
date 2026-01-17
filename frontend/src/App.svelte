@@ -99,6 +99,29 @@
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
   let longPressTriggered = $state(false);
 
+  // UI Sound effects
+  let soundsMuted = $state(localStorage.getItem("soundsMuted") === "true");
+  const sounds: Record<string, HTMLAudioElement> = {};
+
+  function initSounds() {
+    const soundFiles = ["pickup", "drop", "combine", "success", "fail"];
+    for (const name of soundFiles) {
+      sounds[name] = new Audio(`/sounds/${name}.mp3`);
+      sounds[name].volume = 0.3;
+    }
+  }
+
+  function playSound(name: string) {
+    if (soundsMuted || !sounds[name]) return;
+    sounds[name].currentTime = 0;
+    sounds[name].play().catch(() => {});
+  }
+
+  function toggleMute() {
+    soundsMuted = !soundsMuted;
+    localStorage.setItem("soundsMuted", String(soundsMuted));
+  }
+
   async function lookupArtist() {
     if (!newArtist.trim() || addingArtist) return;
     addingArtist = true;
@@ -250,6 +273,9 @@
   }
 
   onMount(async () => {
+    // Initialize sound effects
+    initSounds();
+
     // Check for auth callback (clear URL params)
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.has("auth") || urlParams.has("error")) {
@@ -278,6 +304,7 @@
   function onSidebarMouseDown(e: MouseEvent, el: Element) {
     if (e.button !== 0) return; // Only left click
     e.preventDefault();
+    playSound("pickup");
     dragging = { el, isNew: true, offsetX: 50, offsetY: 15 };
     dragPos = { x: e.clientX, y: e.clientY };
     dragMoved = false;
@@ -287,6 +314,7 @@
     if (e.button !== 0) return; // Only left click
     e.preventDefault();
     e.stopPropagation();
+    playSound("pickup");
     const rect = (e.target as HTMLElement).getBoundingClientRect();
     dragging = { el, isNew: false, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
     dragPos = { x: e.clientX, y: e.clientY };
@@ -303,6 +331,7 @@
 
   function onSidebarTouchStart(e: TouchEvent, el: Element) {
     e.preventDefault();
+    playSound("pickup");
     const touch = e.touches[0];
     dragging = { el, isNew: true, offsetX: 50, offsetY: 15 };
     dragPos = { x: touch.clientX, y: touch.clientY };
@@ -323,6 +352,7 @@
   function onCanvasTouchStart(e: TouchEvent, el: CanvasElement) {
     e.preventDefault();
     e.stopPropagation();
+    playSound("pickup");
     const touch = e.touches[0];
     const rect = (e.target as HTMLElement).getBoundingClientRect();
     dragging = { el, isNew: false, offsetX: touch.clientX - rect.left, offsetY: touch.clientY - rect.top };
@@ -389,6 +419,9 @@
       return;
     }
 
+    // Play drop sound (combine sound will override if combining)
+    if (!nearTarget) playSound("drop");
+
     const canvasRect = canvasEl.getBoundingClientRect();
     const sidebarRect = sidebarEl?.getBoundingClientRect();
     const x = clientX - canvasRect.left - dragging.offsetX;
@@ -451,6 +484,9 @@
       return;
     }
 
+    // Play drop sound (combine sound will override if combining)
+    if (!nearTarget) playSound("drop");
+
     const canvasRect = canvasEl.getBoundingClientRect();
     const sidebarRect = sidebarEl?.getBoundingClientRect();
     const x = e.clientX - canvasRect.left - dragging.offsetX;
@@ -503,6 +539,7 @@
 
   async function combineElements(a: Element, b: Element, x: number, y: number) {
     nearTarget = null;
+    playSound("combine");
 
     // Create a loading placeholder
     const loadingId = crypto.randomUUID();
@@ -527,6 +564,7 @@
       resultPos = { x, y };
 
       if (data.result) {
+        playSound("success");
         if (!allElements.find(e => e.name === data.result.name)) {
           allElements = [...allElements, data.result];
         }
@@ -540,6 +578,7 @@
           }, 2000);
         }
       } else if (data.noMatch) {
+        playSound("fail");
         result = { noMatch: true, message: "No match found" };
       }
     } finally {
@@ -701,7 +740,12 @@
       </div>
     </div>
 
-    <button class="clear" onclick={clearCanvas}>Clear Canvas</button>
+    <div class="sidebar-actions">
+      <button class="mute-btn" onclick={toggleMute} title={soundsMuted ? "Unmute sounds" : "Mute sounds"}>
+        {soundsMuted ? "🔇" : "🔊"}
+      </button>
+      <button class="clear" onclick={clearCanvas}>Clear Canvas</button>
+    </div>
   </aside>
 
   <main class="canvas" bind:this={canvasEl}>
@@ -1081,8 +1125,28 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   }
 
-  .clear {
+  .sidebar-actions {
     margin-top: auto;
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .mute-btn {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 8px;
+    padding: 0.6rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.15s ease;
+  }
+
+  .mute-btn:hover {
+    background: #27272a;
+  }
+
+  .clear {
+    flex: 1;
     background: #18181b;
     color: #666;
     border: 1px solid #27272a;
