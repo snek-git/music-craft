@@ -26,7 +26,7 @@ Inspired by [Infinite Craft](https://neal.fun/infinite-craft/) and [Every Noise 
 | Database | Turso (libSQL) |
 | ORM | Drizzle |
 | AI | Claude Haiku via OpenRouter |
-| Music APIs | Last.fm (validation/metadata), Spotify (OAuth/import/previews) |
+| Music APIs | Last.fm (validation/metadata), Spotify (OAuth/import), Deezer (audio previews) |
 | Deployment | Fly.io |
 | Domain | Cloudflare DNS |
 
@@ -157,15 +157,21 @@ The connection falls back to `file:music-craft.db` for local development if Turs
 ## Key Features
 
 ### Per-User Collections
-- Anonymous users see only seed elements (10 genres + 24 artists)
-- Logged-in users see seeds + their personal discoveries
+- Local user ID via cookie-based UUID (no login required to save discoveries)
+- All users see seeds + their personal discoveries
 - Combinations cached globally for efficiency, but results added to user's collection
 - `user_elements` junction table tracks discoveries per user
 
 ### Click-to-Preview Audio
-- Left-click any artist to play a 30-second Spotify preview
-- Uses Spotify client credentials (no user login required)
-- Minimal "now playing" indicator in bottom-right
+- Left-click any artist to play a 30-second Deezer preview
+- Uses Deezer API (no auth required, Spotify deprecated preview URLs Nov 2024)
+- "Now playing" indicator with artist, track name, and album art
+- Right-click (for Last.fm info) doesn't interrupt playback
+
+### Mobile Support
+- Hamburger menu to toggle sidebar on small screens
+- Touch events: tap to play preview, long press for Last.fm info, drag to move
+- Responsive layout adapts to screen size
 
 ### Spotify Import
 - OAuth login to import user's top 50 artists + genres
@@ -174,7 +180,8 @@ The connection falls back to `file:music-craft.db` for local development if Turs
 
 ### LLM Combinations
 - Claude Haiku via OpenRouter for suggesting combinations
-- Chain-of-thought prompting with 4-step reasoning for artists
+- Chain-of-thought prompting: analyze elements → brainstorm 5 candidates with confidence → reconsider each → pick best
+- Summary field (~10 words) displayed in discovery speech bubble
 - Last.fm context (bio, tags) enriched in prompts
 - Retry logic with failed names as negative examples
 - Validation against Last.fm before accepting artist suggestions
@@ -228,4 +235,5 @@ Check that `CORS_ORIGIN` matches your frontend URL (including https).
 - Frontend uses relative API URLs (`/api/...`) - works in both dev (Vite proxy) and prod (same origin)
 - Backend serves static files from `./public` in production
 - The app is a single Svelte component (`App.svelte`) with no routing
-- Drag-and-drop uses vanilla mouse events, not HTML5 Drag API
+- Drag-and-drop uses vanilla mouse/touch events, not HTML5 Drag API
+- Mobile: long press timer (500ms) distinguishes tap from info request

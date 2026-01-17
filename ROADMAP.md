@@ -5,7 +5,7 @@
 ### Spotify Integration
 - [x] OAuth login flow
 - [x] Import user's top artists (+ their genres)
-- [ ] Play artist previews in-app
+- [x] Play artist previews in-app (via Deezer API)
 - [ ] Create playlists from discovered artists
 
 ### Better Discovery
@@ -15,7 +15,7 @@
 - [ ] "Surprise me" random combination
 
 ### Audio
-- [ ] Spotify/YouTube preview playback
+- [x] Deezer preview playback (Spotify deprecated preview URLs Nov 2024)
 - [ ] Sample tracks in artist info popup
 
 ## Medium Priority
@@ -26,7 +26,7 @@
 - [ ] Element grouping/clusters
 - [ ] Search/filter in sidebar
 - [ ] Keyboard shortcuts (delete, undo)
-- [ ] Mobile touch support
+- [x] Mobile touch support (hamburger menu, long press for info)
 
 ### Data
 - [ ] Export discoveries as playlist
