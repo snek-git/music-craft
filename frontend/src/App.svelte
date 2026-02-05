@@ -121,6 +121,9 @@
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
   let longPressTriggered = $state(false);
 
+  // Cached canvas rect to avoid layout thrashing during drag
+  let cachedCanvasRect: DOMRect | null = null;
+
   function sanitizeBio(html: string): string {
     return html.replace(/<\/?(?!a\b)[^>]*>/gi, "");
   }
@@ -307,6 +310,7 @@
     dragging = { el, isNew: true, offsetX: 50, offsetY: 15 };
     dragPos = { x: e.clientX, y: e.clientY };
     dragMoved = false;
+    cachedCanvasRect = canvasEl?.getBoundingClientRect() ?? null;
   }
 
   function onCanvasMouseDown(e: MouseEvent, el: CanvasElement) {
@@ -317,6 +321,7 @@
     dragging = { el, isNew: false, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top };
     dragPos = { x: e.clientX, y: e.clientY };
     dragMoved = false;
+    cachedCanvasRect = canvasEl?.getBoundingClientRect() ?? null;
   }
 
   // Touch event handlers
@@ -334,6 +339,7 @@
     dragPos = { x: touch.clientX, y: touch.clientY };
     dragMoved = false;
     longPressTriggered = false;
+    cachedCanvasRect = canvasEl?.getBoundingClientRect() ?? null;
 
     // Start long press timer for showing info
     clearLongPressTimer();
@@ -355,6 +361,7 @@
     dragPos = { x: touch.clientX, y: touch.clientY };
     dragMoved = false;
     longPressTriggered = false;
+    cachedCanvasRect = canvasEl?.getBoundingClientRect() ?? null;
 
     // Start long press timer for showing info
     clearLongPressTimer();
@@ -380,10 +387,9 @@
     }
     dragPos = { x: touch.clientX, y: touch.clientY };
 
-    if (canvasEl) {
-      const rect = canvasEl.getBoundingClientRect();
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
+    if (cachedCanvasRect) {
+      const x = touch.clientX - cachedCanvasRect.left;
+      const y = touch.clientY - cachedCanvasRect.top;
       nearTarget = findNearElement(x, y, dragging.el);
     }
   }
@@ -415,7 +421,7 @@
       return;
     }
 
-    const canvasRect = canvasEl.getBoundingClientRect();
+    const canvasRect = cachedCanvasRect || canvasEl.getBoundingClientRect();
     const sidebarRect = sidebarEl?.getBoundingClientRect();
     const x = clientX - canvasRect.left - dragging.offsetX;
     const y = clientY - canvasRect.top - dragging.offsetY;
@@ -442,6 +448,7 @@
 
     dragging = null;
     nearTarget = null;
+    cachedCanvasRect = null;
   }
 
   function onMouseMove(e: MouseEvent) {
@@ -453,11 +460,10 @@
     }
     dragPos = { x: e.clientX, y: e.clientY };
 
-    // Check proximity to other elements
-    if (canvasEl) {
-      const rect = canvasEl.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+    // Check proximity to other elements (use cached rect to avoid layout thrash)
+    if (cachedCanvasRect) {
+      const x = e.clientX - cachedCanvasRect.left;
+      const y = e.clientY - cachedCanvasRect.top;
       nearTarget = findNearElement(x, y, dragging.el);
     }
   }
@@ -477,7 +483,7 @@
       return;
     }
 
-    const canvasRect = canvasEl.getBoundingClientRect();
+    const canvasRect = cachedCanvasRect || canvasEl.getBoundingClientRect();
     const sidebarRect = sidebarEl?.getBoundingClientRect();
     const x = e.clientX - canvasRect.left - dragging.offsetX;
     const y = e.clientY - canvasRect.top - dragging.offsetY;
@@ -509,6 +515,7 @@
 
     dragging = null;
     nearTarget = null;
+    cachedCanvasRect = null;
   }
 
   function findNearElement(x: number, y: number, exclude: Element): CanvasElement | null {
@@ -920,7 +927,7 @@
       class="drag-ghost"
       class:genre={dragging.el.type === "genre"}
       class:artist={dragging.el.type === "artist"}
-      style="left: {dragPos.x - dragging.offsetX}px; top: {dragPos.y - dragging.offsetY}px;"
+      style="transform: translate({dragPos.x - dragging.offsetX}px, {dragPos.y - dragging.offsetY}px);"
     >
       {dragging.el.name}
     </div>
@@ -1219,7 +1226,14 @@
     cursor: grab;
     user-select: none;
     white-space: nowrap;
+  }
+
+  .element {
     transition: transform 0.1s ease, box-shadow 0.1s ease, border-color 0.1s ease;
+  }
+
+  .canvas-element {
+    transition: box-shadow 0.1s ease, border-color 0.1s ease;
   }
 
   .element:hover {
@@ -1258,10 +1272,12 @@
 
   .drag-ghost {
     position: fixed;
+    top: 0;
+    left: 0;
     z-index: 1000;
     pointer-events: none;
     opacity: 0.9;
-    transform: scale(1.05);
+    will-change: transform;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   }
 
