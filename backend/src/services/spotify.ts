@@ -211,11 +211,14 @@ export async function getArtistPreview(artistName: string): Promise<ArtistPrevie
     }
 
     // Get the artist's top tracks
-    const tracksRes = await fetch(`https://api.deezer.com/artist/${artist.id}/top?limit=10`);
+    const tracksRes = await fetch(`https://api.deezer.com/artist/${artist.id}/top?limit=25`);
     if (!tracksRes.ok) return null;
 
     const tracksData = await tracksRes.json();
-    const track = tracksData.data?.find((t: any) => t.preview);
+    // Prefer tracks where this artist is the primary artist (not a feature/collab)
+    const track =
+      tracksData.data?.find((t: any) => t.preview && t.artist?.id === artist.id) ||
+      tracksData.data?.find((t: any) => t.preview);
 
     if (!track) {
       console.log(`Preview: No tracks with preview for "${artistName}"`);
