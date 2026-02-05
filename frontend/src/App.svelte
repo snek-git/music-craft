@@ -62,11 +62,32 @@
     albumArt?: string;
   }
 
+  interface DiscoveryBubble {
+    id: string;
+    x: number;
+    y: number;
+    summary?: string;
+    noMatch?: boolean;
+    type?: "genre" | "artist";
+  }
+
   let allElements: Element[] = $state([]);
   let canvas: CanvasElement[] = $state([]);
   let loadingCombinations: LoadingElement[] = $state([]);
-  let result: any = $state(null);
-  let resultPos = $state({ x: 0, y: 0 });
+  let discoveryBubbles: DiscoveryBubble[] = $state([]);
+
+  function showBubble(x: number, y: number, opts: { summary?: string; noMatch?: boolean; type?: "genre" | "artist" }) {
+    const id = crypto.randomUUID();
+    discoveryBubbles = [...discoveryBubbles, { id, x, y, ...opts }];
+    setTimeout(() => {
+      discoveryBubbles = discoveryBubbles.filter(b => b.id !== id);
+    }, 4000);
+    return id;
+  }
+
+  function dismissBubble(id: string) {
+    discoveryBubbles = discoveryBubbles.filter(b => b.id !== id);
+  }
 
   let dragging: { el: CanvasElement | Element; isNew: boolean; offsetX: number; offsetY: number } | null = $state(null);
   let dragPos = $state({ x: 0, y: 0 });
@@ -254,17 +275,6 @@
 
         showImportModal = false;
         selectedArtists = new Set();
-
-        const artistCount = data.artists?.imported?.length || 0;
-        const genreCount = data.genres?.imported?.length || 0;
-        const parts = [];
-        if (artistCount > 0) parts.push(`${artistCount} artist${artistCount !== 1 ? 's' : ''}`);
-        if (genreCount > 0) parts.push(`${genreCount} genre${genreCount !== 1 ? 's' : ''}`);
-
-        result = {
-          imported: true,
-          message: parts.length > 0 ? `Imported ${parts.join(' and ')}` : 'Nothing new to import'
-        };
       }
     } catch (error) {
       console.error("Failed to import artists:", error);
@@ -556,15 +566,14 @@
         body: JSON.stringify({ elementA: a.id, elementB: b.id, autoSelect: !showMultipleResults }),
       });
       const data = await res.json();
-      resultPos = { x, y };
 
       if (data.result) {
         // Direct result (cached or auto-selected)
-        result = data;
         if (!allElements.find(e => e.name === data.result.name)) {
           allElements = [...allElements, data.result];
         }
         spawnElement(data.result, x, y);
+        showBubble(x, y, { summary: data.combination?.summary, type: data.result.type });
 
         // Show alternates in sidebar if any
         if (data.alternates?.length > 0) {
@@ -589,13 +598,11 @@
           y,
         };
       } else if (data.noMatch || data.error) {
-        result = { noMatch: true, message: "No match found" };
-        resultPos = { x, y };
+        showBubble(x, y, { noMatch: true });
       }
     } catch (e) {
       console.error("Failed to combine:", e);
-      result = { noMatch: true, message: "No match found" };
-      resultPos = { x, y };
+      showBubble(x, y, { noMatch: true });
     } finally {
       // Remove the loading placeholder
       loadingCombinations = loadingCombinations.filter(l => l.instanceId !== loadingId);
@@ -633,14 +640,13 @@
         }),
       });
       const data = await res.json();
-      result = data;
-      resultPos = { x, y };
 
       if (data.result) {
         if (!allElements.find(e => e.name === data.result.name)) {
           allElements = [...allElements, data.result];
         }
         spawnElement(data.result, x, y);
+        showBubble(x, y, { summary: data.combination?.summary, type: data.result.type });
 
         // Show help tooltip on first successful combine
         if (!localStorage.getItem("seenHelp")) {
@@ -688,7 +694,7 @@
 
   function clearCanvas() {
     canvas = [];
-    result = null;
+    discoveryBubbles = [];
   }
 
   async function showElementInfo(el: Element) {
@@ -899,8 +905,8 @@
     {/if}
 
     <!-- First-time help tooltip -->
-    {#if showHelp}
-      <button class="help-tooltip" style="left: {resultPos.x + 120}px; top: {resultPos.y - 10}px;" onclick={() => showHelp = false}>
+    {#if showHelp && discoveryBubbles.length > 0}
+      <button class="help-tooltip" style="left: {discoveryBubbles[discoveryBubbles.length - 1].x + 120}px; top: {discoveryBubbles[discoveryBubbles.length - 1].y - 10}px;" onclick={() => showHelp = false}>
         <div class="help-row desktop-only"><span class="help-key">Click</span> to preview</div>
         <div class="help-row desktop-only"><span class="help-key">Right-click</span> for info</div>
         <div class="help-row mobile-only"><span class="help-key">Tap</span> to preview</div>
@@ -908,18 +914,20 @@
       </button>
     {/if}
 
-    <!-- Discovery speech bubble -->
-    {#if result?.result && result.combination?.summary}
-      <button class="discovery-bubble" class:genre={result.result.type === "genre"} class:artist={result.result.type === "artist"} style="left: {resultPos.x}px; top: {resultPos.y - 60}px;" onclick={() => result = null}>
-        {result.combination.summary}
-        <span class="bubble-arrow"></span>
-      </button>
-    {:else if result?.noMatch}
-      <button class="discovery-bubble no-match" style="left: {resultPos.x}px; top: {resultPos.y - 55}px;" onclick={() => result = null}>
-        <span class="bubble-name">No match found</span>
-        <span class="bubble-arrow"></span>
-      </button>
-    {/if}
+    <!-- Discovery speech bubbles -->
+    {#each discoveryBubbles as bubble (bubble.id)}
+      {#if bubble.summary}
+        <button class="discovery-bubble" class:genre={bubble.type === "genre"} class:artist={bubble.type === "artist"} style="left: {bubble.x}px; top: {bubble.y - 60}px;" onclick={() => dismissBubble(bubble.id)}>
+          {bubble.summary}
+          <span class="bubble-arrow"></span>
+        </button>
+      {:else if bubble.noMatch}
+        <button class="discovery-bubble no-match" style="left: {bubble.x}px; top: {bubble.y - 55}px;" onclick={() => dismissBubble(bubble.id)}>
+          <span class="bubble-name">No match found</span>
+          <span class="bubble-arrow"></span>
+        </button>
+      {/if}
+    {/each}
   </main>
 
   {#if dragging && dragMoved}
