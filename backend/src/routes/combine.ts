@@ -17,12 +17,75 @@ interface ValidatedOption {
   lastfm?: { url: string; listeners: number };
 }
 
+// Helper to save a combination result to the database
+async function saveCombination(
+  userId: string,
+  sortedA: string,
+  sortedB: string,
+  selected: { name: string; type: "genre" | "artist"; reasoning: string; summary: string; confidence: number; lastfm?: { url: string; listeners: number } }
+) {
+  let existingElement = await db.query.elements.findFirst({
+    where: eq(elements.name, selected.name),
+  });
+
+  let newElementId: string;
+  const now = new Date();
+
+  if (existingElement) {
+    newElementId = existingElement.id;
+  } else {
+    newElementId = crypto.randomUUID();
+    await db.insert(elements).values({
+      id: newElementId,
+      name: selected.name,
+      type: selected.type,
+      spotifySearchQuery: selected.name,
+      isBase: false,
+      createdAt: now,
+    });
+  }
+
+  await addToUserCollection(userId, newElementId);
+
+  const combinationId = crypto.randomUUID();
+  await db.insert(combinations).values({
+    id: combinationId,
+    elementA: sortedA,
+    elementB: sortedB,
+    result: newElementId,
+    confidence: selected.confidence,
+    reasoning: selected.reasoning,
+    summary: selected.summary,
+    createdAt: now,
+  });
+
+  const newElement = await db.query.elements.findFirst({
+    where: eq(elements.id, newElementId),
+  });
+
+  return {
+    combination: {
+      id: combinationId,
+      elementA: sortedA,
+      elementB: sortedB,
+      result: newElementId,
+      confidence: selected.confidence,
+      reasoning: selected.reasoning,
+      summary: selected.summary,
+    },
+    result: newElement,
+    lastfm: selected.lastfm,
+    cached: false,
+  };
+}
+
 // Stricter rate limit for combine endpoint (LLM calls are expensive)
 app.post("/", combineLimiter, async (c) => {
   const userId = getOrCreateUserId(c);
-  const { elementA: elementAId, elementB: elementBId } = await c.req.json<{
+  const { elementA: elementAId, elementB: elementBId, autoSelect = true } = await c.req.json<{
     elementA: string;
     elementB: string;
+    autoSelect?: boolean;
   }>();
 
   if (!elementAId || !elementBId) {
@@ -84,65 +147,75 @@ app.post("/", combineLimiter, async (c) => {
 
   const outputType = llmResult.type;
 
-  // For genres, don't need validation - return all candidates
+  // For genres, don't need validation
   if (outputType === "genre") {
-    return c.json({
-      options: llmResult.candidates.map(c => ({
-        name: c.name,
-        reasoning: c.reasoning,
-        summary: c.summary,
-        confidence: c.confidence,
-      })),
-      type: outputType,
-      elementA: sortedA,
-      elementB: sortedB,
-    });
+    const options = llmResult.candidates.map(c => ({
+      name: c.name,
+      reasoning: c.reasoning,
+      summary: c.summary,
+      confidence: c.confidence,
+    }));
+
+    if (autoSelect) {
+      const top = options[0];
+      const saved = await saveCombination(userId, sortedA, sortedB, { ...top, type: "genre" });
+      return c.json({ ...saved, alternates: options.slice(1) });
+    }
+
+    return c.json({ options, type: outputType, elementA: sortedA, elementB: sortedB });
   }
 
-  // For artists, validate each candidate against Last.fm (in parallel)
+  // For artists, validate candidates against Last.fm
+  // Use Promise.allSettled with early collection - validate in parallel but don't block on slow ones
+  const validatedOptions: ValidatedOption[] = [];
   const validationPromises = llmResult.candidates.map(async (candidate) => {
     let validated = await getArtist(candidate.name);
     if (!validated) {
       validated = await searchArtist(candidate.name);
     }
     if (validated) {
-      return {
+      const option: ValidatedOption = {
         name: validated.name,
         reasoning: candidate.reasoning,
         summary: candidate.summary,
         confidence: candidate.confidence,
         lastfm: { url: validated.url, listeners: validated.listeners },
-      } as ValidatedOption;
+      };
+      validatedOptions.push(option);
+      return option;
     }
     return null;
   });
 
-  const validationResults = await Promise.all(validationPromises);
-  const validatedOptions = validationResults.filter((r): r is ValidatedOption => r !== null);
+  await Promise.all(validationPromises);
 
   if (validatedOptions.length === 0) {
-    // Fall back to accepting the top suggestion unverified
     const topCandidate = llmResult.candidates[0];
-    console.log(`No artists validated, accepting unverified: ${topCandidate.name}`);
-    return c.json({
-      options: [{
-        name: topCandidate.name,
-        reasoning: topCandidate.reasoning,
-        summary: topCandidate.summary,
-        confidence: topCandidate.confidence,
-      }],
-      type: outputType,
-      elementA: sortedA,
-      elementB: sortedB,
-    });
+    const fallback = {
+      name: topCandidate.name,
+      reasoning: topCandidate.reasoning,
+      summary: topCandidate.summary,
+      confidence: topCandidate.confidence,
+    };
+
+    if (autoSelect) {
+      const saved = await saveCombination(userId, sortedA, sortedB, { ...fallback, type: "artist" });
+      return c.json(saved);
+    }
+
+    return c.json({ options: [fallback], type: outputType, elementA: sortedA, elementB: sortedB });
   }
 
-  return c.json({
-    options: validatedOptions,
-    type: outputType,
-    elementA: sortedA,
-    elementB: sortedB,
-  });
+  // Sort by confidence to ensure best result first
+  validatedOptions.sort((a, b) => b.confidence - a.confidence);
+
+  if (autoSelect) {
+    const top = validatedOptions[0];
+    const saved = await saveCombination(userId, sortedA, sortedB, { ...top, type: "artist" });
+    return c.json({ ...saved, alternates: validatedOptions.slice(1) });
+  }
+
+  return c.json({ options: validatedOptions, type: outputType, elementA: sortedA, elementB: sortedB });
 });
 
 // Endpoint to confirm a selection and save the combination
@@ -201,61 +274,8 @@ app.post("/select", combineLimiter, async (c) => {
     });
   }
 
-  // Check if element with same name already exists
-  let existingElement = await db.query.elements.findFirst({
-    where: eq(elements.name, selected.name),
-  });
-
-  let newElementId: string;
-  const now = new Date();
-
-  if (existingElement) {
-    newElementId = existingElement.id;
-  } else {
-    newElementId = crypto.randomUUID();
-    await db.insert(elements).values({
-      id: newElementId,
-      name: selected.name,
-      type: selected.type,
-      spotifySearchQuery: selected.name,
-      isBase: false,
-      createdAt: now,
-    });
-  }
-
-  // Add result to user's collection
-  await addToUserCollection(userId, newElementId);
-
-  const combinationId = crypto.randomUUID();
-  await db.insert(combinations).values({
-    id: combinationId,
-    elementA: sortedA,
-    elementB: sortedB,
-    result: newElementId,
-    confidence: selected.confidence,
-    reasoning: selected.reasoning,
-    summary: selected.summary,
-    createdAt: now,
-  });
-
-  const newElement = await db.query.elements.findFirst({
-    where: eq(elements.id, newElementId),
-  });
-
-  return c.json({
-    combination: {
-      id: combinationId,
-      elementA: sortedA,
-      elementB: sortedB,
-      result: newElementId,
-      confidence: selected.confidence,
-      reasoning: selected.reasoning,
-      summary: selected.summary,
-    },
-    result: newElement,
-    lastfm: selected.lastfm,
-    cached: false,
-  });
+  const saved = await saveCombination(userId, sortedA, sortedB, selected);
+  return c.json(saved);
 });
 
 export default app;

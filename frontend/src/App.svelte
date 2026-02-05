@@ -546,18 +546,23 @@
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ elementA: a.id, elementB: b.id }),
+        body: JSON.stringify({ elementA: a.id, elementB: b.id, autoSelect: !showMultipleResults }),
       });
       const data = await res.json();
       resultPos = { x, y };
 
       if (data.result) {
-        // Cached result - single element
+        // Direct result (cached or auto-selected)
         result = data;
         if (!allElements.find(e => e.name === data.result.name)) {
           allElements = [...allElements, data.result];
         }
         spawnElement(data.result, x, y);
+
+        // Show alternates in sidebar if any
+        if (data.alternates?.length > 0) {
+          alternateOptions = data.alternates.map((o: CombineOption) => ({ ...o, type: data.result.type }));
+        }
 
         // Show help tooltip on first successful combine
         if (!localStorage.getItem("seenHelp")) {
@@ -567,23 +572,15 @@
           }, 2000);
         }
       } else if (data.options && data.options.length > 0) {
-        // Multiple options
-        if (showMultipleResults) {
-          // Show picker modal
-          pendingSelection = {
-            options: data.options,
-            type: data.type,
-            elementA: data.elementA,
-            elementB: data.elementB,
-            x,
-            y,
-          };
-        } else {
-          // Auto-select top result, store others as alternates
-          const [top, ...rest] = data.options;
-          alternateOptions = rest.map((o: CombineOption) => ({ ...o, type: data.type }));
-          await selectOptionDirect(top, data.type, data.elementA, data.elementB, x, y);
-        }
+        // Multiple options - show picker modal
+        pendingSelection = {
+          options: data.options,
+          type: data.type,
+          elementA: data.elementA,
+          elementB: data.elementB,
+          x,
+          y,
+        };
       } else if (data.noMatch || data.error) {
         result = { noMatch: true, message: "No match found" };
         resultPos = { x, y };
