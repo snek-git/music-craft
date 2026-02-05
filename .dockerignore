@@ -1,10 +1,9 @@
-node_modules
-frontend/node_modules
-backend/node_modules
-frontend/dist
 .git
-.gitignore
+node_modules
 *.md
 .env
 .env.*
-*.db
+frontend/node_modules
+frontend/dist
+.claude
+1q

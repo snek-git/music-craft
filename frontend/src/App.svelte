@@ -38,6 +38,23 @@
     elementB: string;
   }
 
+  interface CombineOption {
+    name: string;
+    reasoning: string;
+    summary: string;
+    confidence: number;
+    lastfm?: { url: string; listeners: number };
+  }
+
+  interface PendingSelection {
+    options: CombineOption[];
+    type: "genre" | "artist";
+    elementA: string;
+    elementB: string;
+    x: number;
+    y: number;
+  }
+
   interface NowPlaying {
     artistName: string;
     trackName: string;
@@ -95,9 +112,18 @@
   // First-time help tooltip
   let showHelp = $state(false);
 
+  // Multi-option selection state
+  let pendingSelection: PendingSelection | null = $state(null);
+  let showMultipleResults = $state(localStorage.getItem("showMultipleResults") === "true");
+  let alternateOptions: CombineOption[] = $state([]);
+
   // Touch long press handling
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
   let longPressTriggered = $state(false);
+
+  function sanitizeBio(html: string): string {
+    return html.replace(/<\/?(?!a\b)[^>]*>/gi, "");
+  }
 
   async function lookupArtist() {
     if (!newArtist.trim() || addingArtist) return;
@@ -523,6 +549,86 @@
         body: JSON.stringify({ elementA: a.id, elementB: b.id }),
       });
       const data = await res.json();
+      resultPos = { x, y };
+
+      if (data.result) {
+        // Cached result - single element
+        result = data;
+        if (!allElements.find(e => e.name === data.result.name)) {
+          allElements = [...allElements, data.result];
+        }
+        spawnElement(data.result, x, y);
+
+        // Show help tooltip on first successful combine
+        if (!localStorage.getItem("seenHelp")) {
+          setTimeout(() => {
+            showHelp = true;
+            localStorage.setItem("seenHelp", "1");
+          }, 2000);
+        }
+      } else if (data.options && data.options.length > 0) {
+        // Multiple options
+        if (showMultipleResults) {
+          // Show picker modal
+          pendingSelection = {
+            options: data.options,
+            type: data.type,
+            elementA: data.elementA,
+            elementB: data.elementB,
+            x,
+            y,
+          };
+        } else {
+          // Auto-select top result, store others as alternates
+          const [top, ...rest] = data.options;
+          alternateOptions = rest.map((o: CombineOption) => ({ ...o, type: data.type }));
+          await selectOptionDirect(top, data.type, data.elementA, data.elementB, x, y);
+        }
+      } else if (data.noMatch || data.error) {
+        result = { noMatch: true, message: "No match found" };
+        resultPos = { x, y };
+      }
+    } catch (e) {
+      console.error("Failed to combine:", e);
+      result = { noMatch: true, message: "No match found" };
+      resultPos = { x, y };
+    } finally {
+      // Remove the loading placeholder
+      loadingCombinations = loadingCombinations.filter(l => l.instanceId !== loadingId);
+    }
+  }
+
+  async function selectOption(option: CombineOption) {
+    if (!pendingSelection) return;
+
+    const { type, elementA, elementB, x, y, options } = pendingSelection;
+    // Store non-selected options as alternates
+    alternateOptions = options.filter(o => o.name !== option.name);
+    pendingSelection = null;
+
+    await selectOptionDirect(option, type, elementA, elementB, x, y);
+  }
+
+  async function selectOptionDirect(
+    option: CombineOption,
+    type: "genre" | "artist",
+    elementA: string,
+    elementB: string,
+    x: number,
+    y: number
+  ) {
+    try {
+      const res = await fetch("/api/combine/select", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          elementA,
+          elementB,
+          selected: { ...option, type },
+        }),
+      });
+      const data = await res.json();
       result = data;
       resultPos = { x, y };
 
@@ -539,13 +645,41 @@
             localStorage.setItem("seenHelp", "1");
           }, 2000);
         }
-      } else if (data.noMatch) {
-        result = { noMatch: true, message: "No match found" };
       }
-    } finally {
-      // Remove the loading placeholder
-      loadingCombinations = loadingCombinations.filter(l => l.instanceId !== loadingId);
+    } catch (e) {
+      console.error("Failed to select option:", e);
     }
+  }
+
+  function cancelSelection() {
+    pendingSelection = null;
+  }
+
+  function toggleMultipleResults() {
+    showMultipleResults = !showMultipleResults;
+    localStorage.setItem("showMultipleResults", showMultipleResults.toString());
+  }
+
+  async function addAlternate(option: CombineOption & { type?: string }) {
+    try {
+      const res = await fetch("/api/elements", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: option.name, type: option.type || "artist" }),
+      });
+      const data = await res.json();
+      if (data.id) {
+        allElements = [...allElements, data];
+        alternateOptions = alternateOptions.filter(o => o.name !== option.name);
+      }
+    } catch (e) {
+      console.error("Failed to add alternate:", e);
+    }
+  }
+
+  function dismissAlternates() {
+    alternateOptions = [];
   }
 
   function clearCanvas() {
@@ -687,6 +821,25 @@
           <button type="submit" disabled={!newArtist.trim() || addingArtist}>+</button>
         </form>
       {/if}
+      {#if alternateOptions.length > 0}
+        <div class="alternates-section">
+          <div class="alternates-header">
+            <span class="alternates-label">Other suggestions</span>
+            <button class="alternates-dismiss" onclick={dismissAlternates}>&times;</button>
+          </div>
+          <div class="elements">
+            {#each alternateOptions as alt (alt.name)}
+              <button
+                class="element artist alternate"
+                onclick={() => addAlternate(alt)}
+                title={alt.summary}
+              >
+                + {alt.name}
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
       <div class="elements">
         {#each artists as el (el.id)}
           <div
@@ -700,6 +853,11 @@
         {/each}
       </div>
     </div>
+
+    <label class="toggle-row">
+      <input type="checkbox" checked={showMultipleResults} onchange={toggleMultipleResults} />
+      <span>Show multiple results</span>
+    </label>
 
     <button class="clear" onclick={clearCanvas}>Clear Canvas</button>
   </aside>
@@ -738,7 +896,7 @@
 
     <!-- First-time help tooltip -->
     {#if showHelp}
-      <button class="help-tooltip" style="left: {resultPos.x + 80}px; top: {resultPos.y - 10}px;" onclick={() => showHelp = false}>
+      <button class="help-tooltip" style="left: {resultPos.x + 120}px; top: {resultPos.y - 10}px;" onclick={() => showHelp = false}>
         <div class="help-row desktop-only"><span class="help-key">Click</span> to preview</div>
         <div class="help-row desktop-only"><span class="help-key">Right-click</span> for info</div>
         <div class="help-row mobile-only"><span class="help-key">Tap</span> to preview</div>
@@ -748,12 +906,12 @@
 
     <!-- Discovery speech bubble -->
     {#if result?.result && result.combination?.summary}
-      <button class="discovery-bubble" class:genre={result.result.type === "genre"} class:artist={result.result.type === "artist"} style="left: {resultPos.x}px; top: {resultPos.y - 45}px;" onclick={() => result = null}>
+      <button class="discovery-bubble" class:genre={result.result.type === "genre"} class:artist={result.result.type === "artist"} style="left: {resultPos.x}px; top: {resultPos.y - 60}px;" onclick={() => result = null}>
         {result.combination.summary}
         <span class="bubble-arrow"></span>
       </button>
     {:else if result?.noMatch}
-      <button class="discovery-bubble no-match" style="left: {resultPos.x}px; top: {resultPos.y - 40}px;" onclick={() => result = null}>
+      <button class="discovery-bubble no-match" style="left: {resultPos.x}px; top: {resultPos.y - 55}px;" onclick={() => result = null}>
         <span class="bubble-name">No match found</span>
         <span class="bubble-arrow"></span>
       </button>
@@ -787,7 +945,7 @@
           </div>
         {/if}
         {#if selectedInfo.bio}
-          <p class="info-bio">{@html selectedInfo.bio}</p>
+          <p class="info-bio">{@html sanitizeBio(selectedInfo.bio)}</p>
         {/if}
         {#if selectedInfo.url}
           <a class="info-link" href={selectedInfo.url} target="_blank">View on Last.fm</a>
@@ -856,6 +1014,35 @@
             <button class="import-cancel" onclick={closeImportModal}>Cancel</button>
           </div>
         {/if}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Option picker modal -->
+  {#if pendingSelection}
+    <div class="info-overlay" onclick={cancelSelection}>
+      <div class="option-modal" onclick={(e) => e.stopPropagation()}>
+        <button class="info-close" onclick={cancelSelection}>&times;</button>
+        <h2>Choose a result</h2>
+        <p class="option-desc">Multiple matches found. Pick the one that fits best.</p>
+        <div class="option-list">
+          {#each pendingSelection.options as option, i (option.name)}
+            <button
+              class="option-card"
+              class:genre={pendingSelection.type === "genre"}
+              class:artist={pendingSelection.type === "artist"}
+              onclick={() => selectOption(option)}
+            >
+              <div class="option-header">
+                <span class="option-name">{option.name}</span>
+                {#if option.lastfm?.listeners}
+                  <span class="option-listeners">{option.lastfm.listeners.toLocaleString()} listeners</span>
+                {/if}
+              </div>
+              <p class="option-summary">{option.summary}</p>
+            </button>
+          {/each}
+        </div>
       </div>
     </div>
   {/if}
@@ -1079,6 +1266,72 @@
     opacity: 0.9;
     transform: scale(1.05);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: #888;
+    cursor: pointer;
+  }
+
+  .toggle-row input[type="checkbox"] {
+    accent-color: #f472b6;
+    cursor: pointer;
+  }
+
+  .toggle-row:hover {
+    color: #fff;
+  }
+
+  .alternates-section {
+    background: rgba(168, 85, 247, 0.1);
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    border-radius: 8px;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .alternates-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.35rem;
+  }
+
+  .alternates-label {
+    font-size: 0.7rem;
+    color: #a855f7;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .alternates-dismiss {
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 1rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+  }
+
+  .alternates-dismiss:hover {
+    color: #fff;
+  }
+
+  .element.alternate {
+    background: rgba(168, 85, 247, 0.15);
+    border-color: rgba(168, 85, 247, 0.4);
+    color: #a855f7;
+    cursor: pointer;
+  }
+
+  .element.alternate:hover {
+    background: rgba(168, 85, 247, 0.25);
+    border-color: rgba(168, 85, 247, 0.6);
   }
 
   .clear {
@@ -1748,6 +2001,103 @@
   }
 
   /* Mobile responsive styles */
+  /* Option picker modal */
+  .option-modal {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 16px;
+    padding: 1.5rem;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    position: relative;
+  }
+
+  .option-modal h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1.25rem;
+    color: #fff;
+  }
+
+  .option-desc {
+    color: #888;
+    font-size: 0.8rem;
+    margin: 0 0 1rem;
+  }
+
+  .option-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .option-card {
+    background: #1f1f23;
+    border: 2px solid #27272a;
+    border-radius: 10px;
+    padding: 0.75rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: left;
+    width: 100%;
+  }
+
+  .option-card:hover {
+    background: #27272a;
+  }
+
+  .option-card.genre {
+    border-color: rgba(251, 191, 36, 0.3);
+  }
+
+  .option-card.genre:hover {
+    border-color: rgba(251, 191, 36, 0.6);
+    background: rgba(251, 191, 36, 0.1);
+  }
+
+  .option-card.artist {
+    border-color: rgba(244, 114, 182, 0.3);
+  }
+
+  .option-card.artist:hover {
+    border-color: rgba(244, 114, 182, 0.6);
+    background: rgba(244, 114, 182, 0.1);
+  }
+
+  .option-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.35rem;
+  }
+
+  .option-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .option-card.genre .option-name {
+    color: #fbbf24;
+  }
+
+  .option-card.artist .option-name {
+    color: #f472b6;
+  }
+
+  .option-listeners {
+    font-size: 0.7rem;
+    color: #666;
+  }
+
+  .option-summary {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #999;
+    line-height: 1.4;
+  }
+
   @media (max-width: 768px) {
     .menu-btn {
       display: flex;
@@ -1784,7 +2134,7 @@
       max-width: none;
     }
 
-    .info-modal, .import-modal {
+    .info-modal, .import-modal, .option-modal {
       width: 95%;
       max-height: 90vh;
       margin: 1rem;

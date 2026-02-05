@@ -35,7 +35,13 @@ export async function addToUserCollection(userId: string, elementId: string) {
 
 // Add multiple elements to user's collection
 export async function addManyToUserCollection(userId: string, elementIds: string[]) {
-  for (const elementId of elementIds) {
-    await addToUserCollection(userId, elementId);
-  }
+  if (elementIds.length === 0) return;
+  await db.insert(userElements).values(
+    elementIds.map((elementId) => ({
+      id: crypto.randomUUID(),
+      userId,
+      elementId,
+      discoveredAt: new Date(),
+    }))
+  ).onConflictDoNothing();
 }

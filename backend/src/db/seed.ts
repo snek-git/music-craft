@@ -118,8 +118,21 @@ async function seed() {
       result TEXT NOT NULL REFERENCES elements(id),
       confidence REAL NOT NULL,
       reasoning TEXT,
+      summary TEXT,
       created_at INTEGER NOT NULL
     )
+  `);
+
+  // Migration: add summary column if it doesn't exist
+  try {
+    await client.execute(`ALTER TABLE combinations ADD COLUMN summary TEXT`);
+    console.log("Added summary column to combinations table");
+  } catch (e: any) {
+    // Column already exists, ignore
+  }
+
+  await client.execute(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_elements_name ON elements(name)
   `);
 
   await client.execute(`

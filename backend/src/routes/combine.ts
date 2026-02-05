@@ -9,7 +9,13 @@ import { getOrCreateUserId, addToUserCollection } from "../utils/userCollection"
 
 const app = new Hono();
 
-const MAX_RETRIES = 3;
+interface ValidatedOption {
+  name: string;
+  reasoning: string;
+  summary: string;
+  confidence: number;
+  lastfm?: { url: string; listeners: number };
+}
 
 // Stricter rate limit for combine endpoint (LLM calls are expensive)
 app.post("/", combineLimiter, async (c) => {
@@ -60,70 +66,144 @@ app.post("/", combineLimiter, async (c) => {
     });
   }
 
-  const failedNames: string[] = [];
-  let llmResult = null;
-  let finalName = "";
-  let lastfmData = null;
-  let lastSuggestion = "";
-
-  // Get all existing artists to avoid repetition
-  const existingArtists = await db.select({ name: elements.name })
-    .from(elements)
-    .where(eq(elements.type, "artist"));
-  const excludeArtists = existingArtists.map(e => e.name);
-
   // Fetch Last.fm data for artists to enrich the LLM prompt
   const [lastfmA, lastfmB] = await Promise.all([
     elA.type === "artist" ? getArtist(elA.name) : null,
     elB.type === "artist" ? getArtist(elB.name) : null,
   ]);
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    llmResult = await combineElements(
-      { name: elA.name, type: elA.type, bio: lastfmA?.bio, tags: lastfmA?.tags },
-      { name: elB.name, type: elB.type, bio: lastfmB?.bio, tags: lastfmB?.tags },
-      failedNames
-    );
+  const llmResult = await combineElements(
+    { name: elA.name, type: elA.type, bio: lastfmA?.bio, tags: lastfmA?.tags },
+    { name: elB.name, type: elB.type, bio: lastfmB?.bio, tags: lastfmB?.tags },
+    []
+  );
 
-    if (!llmResult) break;
-
-    // For artists, try to validate with Last.fm
-    if (llmResult.type === "artist") {
-      lastSuggestion = llmResult.name;
-      let validated = await getArtist(llmResult.name);
-      if (!validated) {
-        validated = await searchArtist(llmResult.name);
-      }
-
-      if (validated) {
-        console.log(`Validated artist: ${validated.name} (${validated.listeners} listeners)`);
-        finalName = validated.name;
-        lastfmData = { url: validated.url, listeners: validated.listeners };
-        break;
-      }
-
-      console.log(`Artist not found on Last.fm: ${llmResult.name}, retrying...`);
-      failedNames.push(llmResult.name);
-    } else {
-      // Genres don't need validation
-      finalName = llmResult.name;
-      break;
-    }
-  }
-
-  // If Last.fm validation failed but LLM suggested something, accept it anyway
-  if (!finalName && lastSuggestion && llmResult) {
-    console.log(`Accepting unverified artist: ${lastSuggestion}`);
-    finalName = lastSuggestion;
-  }
-
-  if (!llmResult || !finalName) {
+  if (!llmResult || llmResult.candidates.length === 0) {
     return c.json({ error: "No valid result found", noMatch: true }, 200);
+  }
+
+  const outputType = llmResult.type;
+
+  // For genres, don't need validation - return all candidates
+  if (outputType === "genre") {
+    return c.json({
+      options: llmResult.candidates.map(c => ({
+        name: c.name,
+        reasoning: c.reasoning,
+        summary: c.summary,
+        confidence: c.confidence,
+      })),
+      type: outputType,
+      elementA: sortedA,
+      elementB: sortedB,
+    });
+  }
+
+  // For artists, validate each candidate against Last.fm (in parallel)
+  const validationPromises = llmResult.candidates.map(async (candidate) => {
+    let validated = await getArtist(candidate.name);
+    if (!validated) {
+      validated = await searchArtist(candidate.name);
+    }
+    if (validated) {
+      return {
+        name: validated.name,
+        reasoning: candidate.reasoning,
+        summary: candidate.summary,
+        confidence: candidate.confidence,
+        lastfm: { url: validated.url, listeners: validated.listeners },
+      } as ValidatedOption;
+    }
+    return null;
+  });
+
+  const validationResults = await Promise.all(validationPromises);
+  const validatedOptions = validationResults.filter((r): r is ValidatedOption => r !== null);
+
+  if (validatedOptions.length === 0) {
+    // Fall back to accepting the top suggestion unverified
+    const topCandidate = llmResult.candidates[0];
+    console.log(`No artists validated, accepting unverified: ${topCandidate.name}`);
+    return c.json({
+      options: [{
+        name: topCandidate.name,
+        reasoning: topCandidate.reasoning,
+        summary: topCandidate.summary,
+        confidence: topCandidate.confidence,
+      }],
+      type: outputType,
+      elementA: sortedA,
+      elementB: sortedB,
+    });
+  }
+
+  return c.json({
+    options: validatedOptions,
+    type: outputType,
+    elementA: sortedA,
+    elementB: sortedB,
+  });
+});
+
+// Endpoint to confirm a selection and save the combination
+app.post("/select", combineLimiter, async (c) => {
+  const userId = getOrCreateUserId(c);
+  const { elementA: elementAId, elementB: elementBId, selected } = await c.req.json<{
+    elementA: string;
+    elementB: string;
+    selected: {
+      name: string;
+      reasoning: string;
+      summary: string;
+      confidence: number;
+      type: "genre" | "artist";
+      lastfm?: { url: string; listeners: number };
+    };
+  }>();
+
+  if (!elementAId || !elementBId || !selected) {
+    return c.json({ error: "elementA, elementB, and selected are required" }, 400);
+  }
+
+  if (typeof selected.name !== "string" || selected.name.length < 1 || selected.name.length > 200) {
+    return c.json({ error: "selected.name must be a string between 1 and 200 characters" }, 400);
+  }
+
+  if (selected.type !== "genre" && selected.type !== "artist") {
+    return c.json({ error: "selected.type must be 'genre' or 'artist'" }, 400);
+  }
+
+  if (typeof selected.confidence !== "number" || selected.confidence < 0 || selected.confidence > 1) {
+    return c.json({ error: "selected.confidence must be a number between 0 and 1" }, 400);
+  }
+
+  const [sortedA, sortedB] = [elementAId, elementBId].sort();
+
+  // Check if already cached (race condition protection)
+  const existing = await db.query.combinations.findFirst({
+    where: and(
+      eq(combinations.elementA, sortedA),
+      eq(combinations.elementB, sortedB)
+    ),
+  });
+
+  if (existing) {
+    const resultElement = await db.query.elements.findFirst({
+      where: eq(elements.id, existing.result),
+    });
+    if (resultElement) {
+      await addToUserCollection(userId, resultElement.id);
+    }
+    return c.json({
+      combination: existing,
+      result: resultElement,
+      cached: true,
+    });
   }
 
   // Check if element with same name already exists
   let existingElement = await db.query.elements.findFirst({
-    where: eq(elements.name, finalName),
+    where: eq(elements.name, selected.name),
   });
 
   let newElementId: string;
@@ -135,9 +215,9 @@ app.post("/", combineLimiter, async (c) => {
     newElementId = crypto.randomUUID();
     await db.insert(elements).values({
       id: newElementId,
-      name: finalName,
-      type: llmResult.type,
-      spotifySearchQuery: finalName,
+      name: selected.name,
+      type: selected.type,
+      spotifySearchQuery: selected.name,
       isBase: false,
       createdAt: now,
     });
@@ -152,8 +232,9 @@ app.post("/", combineLimiter, async (c) => {
     elementA: sortedA,
     elementB: sortedB,
     result: newElementId,
-    confidence: llmResult.confidence,
-    reasoning: llmResult.reasoning,
+    confidence: selected.confidence,
+    reasoning: selected.reasoning,
+    summary: selected.summary,
     createdAt: now,
   });
 
@@ -167,12 +248,12 @@ app.post("/", combineLimiter, async (c) => {
       elementA: sortedA,
       elementB: sortedB,
       result: newElementId,
-      confidence: llmResult.confidence,
-      reasoning: llmResult.reasoning,
-      summary: llmResult.summary,
+      confidence: selected.confidence,
+      reasoning: selected.reasoning,
+      summary: selected.summary,
     },
     result: newElement,
-    lastfm: lastfmData,
+    lastfm: selected.lastfm,
     cached: false,
   });
 });

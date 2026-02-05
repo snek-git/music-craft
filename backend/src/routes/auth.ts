@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { sign, verify } from "hono/jwt";
+import { sign } from "hono/jwt";
 import { db } from "../db";
 import { users } from "../db/schema";
 import {
@@ -10,6 +10,7 @@ import {
   getCurrentUser,
 } from "../services/spotify";
 import { authLimiter } from "../middleware/rateLimit";
+import { verifySessionToken } from "../middleware/auth";
 
 const app = new Hono();
 
@@ -24,22 +25,10 @@ async function createSessionToken(userId: string): Promise<string> {
   return await sign({ userId, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30 }, JWT_SECRET);
 }
 
-// Helper to verify session token
-async function verifySessionToken(token: string): Promise<{ userId: string } | null> {
-  try {
-    const payload = await verify(token, JWT_SECRET, "HS256");
-    return { userId: payload.userId as string };
-  } catch {
-    return null;
-  }
-}
-
 // GET /api/auth/login - Start OAuth flow
 app.get("/login", authLimiter, (c) => {
-  console.log("Login endpoint hit!");
   const state = crypto.randomUUID();
   const authUrl = getAuthorizationUrl(state);
-  console.log("Redirecting to:", authUrl);
 
   // Store state in cookie for CSRF protection
   setCookie(c, "oauth_state", state, {
@@ -54,38 +43,28 @@ app.get("/login", authLimiter, (c) => {
 
 // GET /api/auth/callback - Handle OAuth callback
 app.get("/callback", authLimiter, async (c) => {
-  console.log("Callback hit!");
-  console.log("Query params:", { code: c.req.query("code")?.slice(0,10), state: c.req.query("state"), error: c.req.query("error") });
-
   const code = c.req.query("code");
   const state = c.req.query("state");
   const error = c.req.query("error");
   const storedState = getCookie(c, "oauth_state");
-  console.log("Stored state:", storedState);
 
   // Clear state cookie
   deleteCookie(c, "oauth_state");
 
   if (error) {
-    console.log("Spotify returned error:", error);
     return c.redirect(`${FRONTEND_URL}?error=access_denied`);
   }
 
   if (!code || !state || state !== storedState) {
-    console.log("State mismatch! state:", state, "storedState:", storedState);
     return c.redirect(`${FRONTEND_URL}?error=invalid_state`);
   }
 
   try {
     // Exchange code for tokens
-    console.log("Exchanging code for tokens...");
     const tokens = await exchangeCodeForTokens(code);
-    console.log("Got tokens!");
 
     // Get user profile
-    console.log("Getting user profile...");
     const spotifyUser = await getCurrentUser(tokens.access_token);
-    console.log("Got user:", spotifyUser.display_name);
 
     // Check if user exists
     let user = await db.query.users.findFirst({
@@ -130,15 +109,11 @@ app.get("/callback", authLimiter, async (c) => {
     }
 
     if (!user) {
-      console.log("User creation failed!");
       return c.redirect(`${FRONTEND_URL}?error=user_creation_failed`);
     }
 
-    console.log("User found/created:", user.id);
-
     // Create session token
     const sessionToken = await createSessionToken(user.id);
-    console.log("Session token created:", sessionToken.slice(0, 20) + "...");
 
     // Set session cookie (httpOnly for security)
     setCookie(c, "session", sessionToken, {
@@ -149,7 +124,6 @@ app.get("/callback", authLimiter, async (c) => {
       path: "/",
     });
 
-    console.log("Redirecting to frontend with session cookie");
     return c.redirect(`${FRONTEND_URL}?auth=success`);
   } catch (error) {
     console.error("OAuth callback error:", error);

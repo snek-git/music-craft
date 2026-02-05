@@ -16,6 +16,10 @@ const app = new Hono();
 
 const isProduction = process.env.NODE_ENV === "production";
 
+// In-memory cache for Deezer preview URLs (24 hour TTL)
+const previewCache = new Map<string, { data: any; expires: number }>();
+const PREVIEW_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
 // Input validation constants
 const MAX_NAME_LENGTH = 200;
 const VALID_ELEMENT_TYPES = ["genre", "artist"] as const;
@@ -42,24 +46,29 @@ app.use("/*", cors({
 app.use("/api/*", generalLimiter);
 
 app.get("/api/elements", async (c) => {
-  const userId = getOrCreateUserId(c);
+  try {
+    const userId = getOrCreateUserId(c);
 
-  // Get user's discoveries
-  const userDiscoveries = await db.select({ elementId: userElements.elementId })
-    .from(userElements)
-    .where(eq(userElements.userId, userId));
+    // Get user's discoveries
+    const userDiscoveries = await db.select({ elementId: userElements.elementId })
+      .from(userElements)
+      .where(eq(userElements.userId, userId));
 
-  const discoveredIds = userDiscoveries.map(d => d.elementId);
+    const discoveredIds = userDiscoveries.map(d => d.elementId);
 
-  let userElementsList;
-  if (discoveredIds.length > 0) {
-    userElementsList = await db.select().from(elements)
-      .where(or(eq(elements.isBase, true), inArray(elements.id, discoveredIds)));
-  } else {
-    userElementsList = await db.select().from(elements).where(eq(elements.isBase, true));
+    let userElementsList;
+    if (discoveredIds.length > 0) {
+      userElementsList = await db.select().from(elements)
+        .where(or(eq(elements.isBase, true), inArray(elements.id, discoveredIds)));
+    } else {
+      userElementsList = await db.select().from(elements).where(eq(elements.isBase, true));
+    }
+
+    return c.json(userElementsList);
+  } catch (error) {
+    console.error("Failed to fetch elements:", error);
+    return c.json({ error: "Failed to fetch elements" }, 500);
   }
-
-  return c.json(userElementsList);
 });
 
 app.get("/api/elements/lookup", async (c) => {
@@ -143,7 +152,22 @@ app.get("/api/preview/:name", async (c) => {
   if (!nameResult.valid) {
     return c.json({ error: nameResult.error }, 400);
   }
+
+  const cacheKey = nameResult.value.toLowerCase();
+  const cached = previewCache.get(cacheKey);
+  if (cached && Date.now() <= cached.expires) {
+    if (!cached.data) return c.json({ error: "No preview available" }, 404);
+    return c.json(cached.data);
+  }
+  if (cached) previewCache.delete(cacheKey);
+
   const preview = await getArtistPreview(nameResult.value);
+  previewCache.set(cacheKey, { data: preview, expires: Date.now() + PREVIEW_CACHE_TTL });
+  if (previewCache.size > 5000) {
+    const firstKey = previewCache.keys().next().value;
+    if (firstKey) previewCache.delete(firstKey);
+  }
+
   if (!preview) {
     return c.json({ error: "No preview available" }, 404);
   }

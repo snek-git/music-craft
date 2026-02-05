@@ -1,8 +1,12 @@
-interface CombineResult {
+interface CombineCandidate {
   name: string;
   reasoning: string;
   summary: string;
   confidence: number;
+}
+
+interface CombineResult {
+  candidates: CombineCandidate[];
   type: "genre" | "artist";
 }
 
@@ -32,17 +36,17 @@ Genre A: ${elementA.name}
 Genre B: ${elementB.name}
 
 Requirements:
-- Must be a real, recognized genre or subgenre
+- Must be real, recognized genres or subgenres
 - Should genuinely combine qualities of both inputs
 - Examples: "Rock + Electronic = Synthwave", "Jazz + Hip-Hop = Jazz Rap"
-- If no good match exists, respond with {"name": "NO_MATCH"}${failedNote}
+- If no good matches exist, respond with {"candidates": []}${failedNote}
 
-Respond with ONLY valid JSON:
+Respond with ONLY valid JSON (array of up to 5 options, sorted by confidence):
 {
-  "name": "Genre Name",
-  "reasoning": "One sentence on why they fit",
-  "summary": "~10 words explaining the mix",
-  "confidence": 0.0-1.0
+  "candidates": [
+    {"name": "Genre Name", "reasoning": "Why they fit", "summary": "~10 words", "confidence": 0.9},
+    ...
+  ]
 }`
     : `You are a music discovery expert. Find an artist at the TRUE intersection of these two elements.
 
@@ -70,20 +74,21 @@ STEP 3 - Reconsider each:
 - Is candidate 2 too obvious/mainstream?
 - etc.
 
-STEP 4 - Pick the best one.
+STEP 4 - Finalize your top 5 with summaries.
 
 Requirements:
-- Must be a real artist with released music
+- Must be real artists with released music
 - NOT just "related to both" - must be the MIDDLE GROUND
 - Avoid obvious/mainstream choices
-- If no good match exists, respond with {"name": "NO_MATCH"}${failedNote}
+- If no good matches exist, respond with {"candidates": []}${failedNote}
 
-After your reasoning, respond with ONLY this JSON:
+After your reasoning, respond with ONLY this JSON (array of your best 5, sorted by confidence):
 {
-  "name": "Artist Name",
-  "reasoning": "How they blend both A and B",
-  "summary": "~10 words explaining the mix",
-  "confidence": 0.0-1.0
+  "candidates": [
+    {"name": "Artist 1", "reasoning": "How they blend both", "summary": "~10 words", "confidence": 0.9},
+    {"name": "Artist 2", "reasoning": "How they blend both", "summary": "~10 words", "confidence": 0.8},
+    ...
+  ]
 }`;
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -94,7 +99,7 @@ After your reasoning, respond with ONLY this JSON:
     },
     body: JSON.stringify({
       model: "anthropic/claude-haiku-4.5",
-      max_tokens: 1024,
+      max_tokens: 2048,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -112,13 +117,19 @@ After your reasoning, respond with ONLY this JSON:
   const text = data.choices?.[0]?.message?.content ?? "";
 
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    // Anchor on "candidates" key to skip any { in chain-of-thought reasoning
+    const jsonMatch = text.match(/\{\s*"candidates"\s*:[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON found");
-    const parsed = JSON.parse(jsonMatch[0]) as { name: string; reasoning: string; summary?: string; confidence: number };
-    if (parsed.name === "NO_MATCH") {
+    const parsed = JSON.parse(jsonMatch[0]) as { candidates: CombineCandidate[] };
+    if (!parsed.candidates || parsed.candidates.length === 0) {
       return null;
     }
-    return { ...parsed, summary: parsed.summary || "", type: outputType };
+    // Ensure all candidates have summary field
+    const candidates = parsed.candidates.map(c => ({
+      ...c,
+      summary: c.summary || "",
+    }));
+    return { candidates, type: outputType };
   } catch {
     console.error("Failed to parse LLM response:", text);
     return null;

@@ -18,7 +18,11 @@ export function rateLimit(options: RateLimitOptions) {
   const {
     windowMs,
     max,
-    keyGenerator = (c) => c.req.header("x-forwarded-for") || "unknown",
+    keyGenerator = (c) =>
+      c.req.header("fly-client-ip") ||
+      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
+      c.req.header("x-real-ip") ||
+      "anon-" + crypto.randomUUID(),
     name = "default",
   } = options;
 

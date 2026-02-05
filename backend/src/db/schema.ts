@@ -1,4 +1,4 @@
-import { sqliteTable, text, real, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, real, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
@@ -20,7 +20,9 @@ export const elements = sqliteTable("elements", {
   spotifySearchQuery: text("spotify_search_query"),
   isBase: integer("is_base", { mode: "boolean" }).default(false), // Seed elements everyone can see
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-});
+}, (table) => [
+  uniqueIndex("idx_elements_name").on(table.name),
+]);
 
 // Tracks which elements a user has discovered/unlocked
 // userId is a local UUID stored in cookie, not linked to users table
@@ -29,7 +31,10 @@ export const userElements = sqliteTable("user_elements", {
   userId: text("user_id").notNull(),
   elementId: text("element_id").notNull().references(() => elements.id),
   discoveredAt: integer("discovered_at", { mode: "timestamp" }).notNull(),
-});
+}, (table) => [
+  uniqueIndex("idx_user_elements_user_element").on(table.userId, table.elementId),
+  index("idx_user_elements_user").on(table.userId),
+]);
 
 export const combinations = sqliteTable("combinations", {
   id: text("id").primaryKey(),
@@ -38,8 +43,11 @@ export const combinations = sqliteTable("combinations", {
   result: text("result").notNull().references(() => elements.id),
   confidence: real("confidence").notNull(),
   reasoning: text("reasoning"),
+  summary: text("summary"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-});
+}, (table) => [
+  index("idx_combo_elements").on(table.elementA, table.elementB),
+]);
 
 export type User = typeof users.$inferSelect;
 export type Element = typeof elements.$inferSelect;
